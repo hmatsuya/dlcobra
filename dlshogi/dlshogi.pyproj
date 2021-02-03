@@ -17,6 +17,7 @@
     <CommandLineArguments>F:\selfplay\selfplay-239_org3 F:\selfplay\floodgate.hcpe --model R:\model --state R:\state --lr 0.001 --eval_interval 100 -b 64 --swa_freq 100</CommandLineArguments>
     <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
     <SuppressConfigureTestFrameworkPrompt>true</SuppressConfigureTestFrameworkPrompt>
+    <InterpreterId>Global|ContinuumAnalytics|Anaconda38-64</InterpreterId>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>
@@ -49,6 +50,9 @@
     <Compile Include="__init__.py">
       <SubType>Code</SubType>
     </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <InterpreterReference Include="Global|ContinuumAnalytics|Anaconda38-64" />
   </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
