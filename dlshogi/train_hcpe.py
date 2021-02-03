@@ -11,6 +11,8 @@ import random
 
 import logging
 
+import wandb
+
 parser = argparse.ArgumentParser(description='Traning RL policy network using hcpe')
 parser.add_argument('train_data', type=str, nargs='+', help='train data file')
 parser.add_argument('test_data', type=str, help='test data file')
@@ -35,7 +37,14 @@ parser.add_argument('--swa_freq', type=int, default=250)
 parser.add_argument('--swa_n_avr', type=int, default=10)
 parser.add_argument('--swa_lr', type=float)
 parser.add_argument('--use_amp', action='store_true', help='Use automatic mixed precision')
+parser.add_argument('--run_id', type=str, default='dlshogi', help='Run ID for logging with wandb')
 args = parser.parse_args()
+
+os.environ["WANDB_RESUME"] = "allow"
+# os.environ["WANDB_RUN_ID"] = wandb.util.generate_id()
+os.environ["WANDB_RUN_ID"] = f'{args.run_id}'
+wandb.init(project="meijincobra")
+wandb.config.update(args)
 
 if args.network == 'wideresnet15':
     from dlshogi.policy_value_network_wideresnet15 import *
@@ -180,6 +189,14 @@ for e in range(args.epoch):
                     sum_loss1 / itr, sum_loss2 / itr, sum_loss3 / itr, sum_loss / itr,
                     loss1.item(), loss2.item(), loss3.item(), loss.item(),
                     accuracy(y1, t1), binary_accuracy(y2, t2)))
+
+                wandb.log({
+                    'epoch': epoch+1,
+                    'iteration': t,
+                    'train/loss1': sum_loss1 / itr, 'train/loss2': sum_loss2 / itr, 'train/loss3': sum_loss3 / itr, 'train/loss': sum_loss /itr,
+                    'test/loss1':loss1.item(), 'test/loss2': loss2.item(), 'test/loss3': loss3.item(), 'test/loss': loss.item(),
+                    'test/accuracy': accuracy(y1, t1), 'test/binary_accuracy': binary_accuracy(y2, t2),
+                })
             itr = 0
             sum_loss1 = 0
             sum_loss2 = 0
@@ -235,6 +252,15 @@ for e in range(args.epoch):
             sum_test_accuracy1 / itr_test, sum_test_accuracy2 / itr_test,
             sum_test_entropy1 / itr_test, sum_test_entropy2 / itr_test))
 
+        wandb.log({
+            'epoch': epoch+1,
+            'iteration': t,
+            'swa_train/loss1': sum_loss1_epoch / itr_epoch, 'swa_train/loss2': sum_loss2_epoch / itr_epoch, 'swa_train/loss3': sum_loss3_epoch / itr_epoch, 'swa_train/loss': sum_loss_epoch /itr_epoch,
+            'swa_test/loss1': sum_test_loss1 / itr_test, 'swa_test/loss2': sum_test_loss2 / itr_test, 'swa_test/loss3': sum_test_loss3 / itr_test, 'swa_test/loss': sum_test_loss / itr_test,
+            'swa_test/accuracy': sum_test_accuracy1 / itr_test, 'swa_test/binary_accuracy': sum_test_accuracy2 / itr_test,
+            'swa_test/entropy1': sum_test_entropy1 / itr_test, 'swa_test/entropy2': sum_test_entropy2 / itr_test,
+        })
+
     epoch += 1
 
     if args.use_swa:
@@ -252,3 +278,5 @@ state = {
 if args.use_amp:
     state['scaler_state_dict'] = scaler.state_dict()
 torch.save(state, args.state)
+
+wandb.save('dlmodel.h5')
