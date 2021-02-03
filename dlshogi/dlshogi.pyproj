@@ -17,6 +17,7 @@
     <CommandLineArguments>F:\selfplay\selfplay-445_org f:\selfplay\floodgate.hcpe --network resnet10_swish --model r:\model --state r:\state --eval_interval 100 --use_amp --use_critic --use_evalfix</CommandLineArguments>
     <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
     <SuppressConfigureTestFrameworkPrompt>true</SuppressConfigureTestFrameworkPrompt>
+    <InterpreterId>Global|ContinuumAnalytics|Anaconda38-64</InterpreterId>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>
@@ -54,6 +55,9 @@
     <Compile Include="__init__.py">
       <SubType>Code</SubType>
     </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <InterpreterReference Include="Global|ContinuumAnalytics|Anaconda38-64" />
   </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
