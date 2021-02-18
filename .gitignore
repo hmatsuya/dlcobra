@@ -251,3 +251,8 @@ ModelManifest.xml
 /dlshogi.egg-info
 /dlshogi/opponent_models
 /dlshogi/cppshogi.pyd
+
+model/*
+.ipynb_checkpoints
+__pycache__
+dlshogi/wandb
