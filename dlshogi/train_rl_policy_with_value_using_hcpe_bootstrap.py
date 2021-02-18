@@ -39,13 +39,14 @@ parser.add_argument('--swa_freq', type=int, default=250)
 parser.add_argument('--swa_n_avr', type=int, default=10)
 parser.add_argument('--swa_lr', type=float)
 parser.add_argument('--use_amp', action='store_true', help='Use automatic mixed precision')
+parser.add_argument('--project', type=str, default='meijincobra', help='Project name for logging with wandb')
 parser.add_argument('--run_id', type=str, default='dlshogi', help='Run ID for logging with wandb')
 args = parser.parse_args()
 
 os.environ["WANDB_RESUME"] = "allow"
 # os.environ["WANDB_RUN_ID"] = wandb.util.generate_id()
 os.environ["WANDB_RUN_ID"] = f'{args.run_id}'
-wandb.init(project="meijincobra")
+wandb.init(project=args.project)
 wandb.config.update(args)
 
 if args.network == 'wideresnet15':
