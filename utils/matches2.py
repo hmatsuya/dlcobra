@@ -129,6 +129,8 @@ def matches(args):
         is_game_over = False
         sec_sum = [0.0, 0.0]
         position = 'position startpos moves'
+        if args.initial_positions is not None:
+            position = position + ' ' + ' '.join(init_position)
         repetition_hash = defaultdict(int)
         while not is_game_over:
             for i, p in enumerate(procs):
@@ -181,6 +183,7 @@ def matches(args):
                             # 入玉勝ち宣言
                             is_nyugyoku = True
                         else:
+                            assert(board.is_pseudo_legal(board.move_from_usi(move_usi)), "ERROR: Illegal move: " + move_usi)
                             board.push_usi(move_usi)
                             position += ' ' + move_usi
                             repetition_hash[board.zobrist_hash()] += 1
@@ -191,6 +194,7 @@ def matches(args):
                 # 終局判定
                 repetition = board.is_draw()
                 if repetition in [cshogi.REPETITION_DRAW, cshogi.REPETITION_WIN, cshogi.REPETITION_LOSE] and repetition_hash[board.zobrist_hash()] == 4:
+                    is_game_over = True
                     break
                 repetition = cshogi.NOT_REPETITION
                 if is_resign or is_nyugyoku or board.is_game_over():
