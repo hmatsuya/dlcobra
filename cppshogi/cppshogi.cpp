@@ -6,7 +6,7 @@
 // make input features
 template <Color turn>
 inline void make_input_features(const Position& position, features1_t* features1, features2_t* features2) {
-	DType(*features2_hand)[ColorNum][MAX_PIECES_IN_HAND_SUM][SquareNum] = reinterpret_cast<DType(*)[ColorNum][MAX_PIECES_IN_HAND_SUM][SquareNum]>(features2);
+	DType(*features2_hand)[ColorNum][MAX_PIECES_IN_HAND_SUM] = reinterpret_cast<DType(*)[ColorNum][MAX_PIECES_IN_HAND_SUM]>(features2);
 
 	const Bitboard occupied_bb = position.occupiedBB();
 
@@ -66,14 +66,14 @@ inline void make_input_features(const Position& position, features1_t* features1
 			if (num >= MAX_PIECES_IN_HAND[hp]) {
 				num = MAX_PIECES_IN_HAND[hp];
 			}
-			std::fill_n((*features2_hand)[c2][p], (int)SquareNum * num, 1);
+			std::fill_n((*features2_hand)[c2][p], num, 1);
 			p += MAX_PIECES_IN_HAND[hp];
 		}
 	}
 
 	// is check
 	if (position.inCheck()) {
-		std::fill_n((*features2)[MAX_FEATURES2_HAND_NUM], SquareNum, 1);
+		std::fill_n((*features2)[MAX_FEATURES2_HAND_NUM], 1, 1);
 	}
 }
 

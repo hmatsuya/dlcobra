@@ -49,7 +49,7 @@ const MOVE_DIRECTION MOVE_DIRECTION_PROMOTED[] = {
 constexpr int MAX_MOVE_LABEL_NUM = MOVE_DIRECTION_NUM + HandPieceNum;
 
 typedef DType features1_t[ColorNum][MAX_FEATURES1_NUM][SquareNum];
-typedef DType features2_t[MAX_FEATURES2_NUM][SquareNum];
+typedef DType features2_t[MAX_FEATURES2_NUM];
 
 void make_input_features(const Position& position, features1_t* features1, features2_t* features2);
 int make_move_label(const u16 move16, const Color color);
