@@ -43,11 +43,12 @@ parser.add_argument('--project', type=str, default='meijincobra', help='Project 
 parser.add_argument('--run_id', type=str, default='dlshogi', help='Run ID for logging with wandb')
 args = parser.parse_args()
 
-os.environ["WANDB_RESUME"] = "allow"
-# os.environ["WANDB_RUN_ID"] = wandb.util.generate_id()
-os.environ["WANDB_RUN_ID"] = f'{args.run_id}'
-wandb.init(project=args.project)
-wandb.config.update(args)
+if args.project != "None":
+    os.environ["WANDB_RESUME"] = "allow"
+    # os.environ["WANDB_RUN_ID"] = wandb.util.generate_id()
+    os.environ["WANDB_RUN_ID"] = f'{args.run_id}'
+    wandb.init(project=args.project)
+    wandb.config.update(args)
 
 if args.network == 'wideresnet15':
     from dlshogi.policy_value_network_wideresnet15 import *
@@ -121,7 +122,7 @@ logging.info('test position num = {}'.format(len(test_data)))
 # mini batch
 def mini_batch(hcpevec):
     features1 = np.empty((len(hcpevec), FEATURES1_NUM, 9, 9), dtype=np.float32)
-    features2 = np.empty((len(hcpevec), FEATURES2_NUM), dtype=np.float32)
+    features2 = np.empty((len(hcpevec), FEATURES2_NUM, 1, 1), dtype=np.float32)
     move = np.empty((len(hcpevec)), dtype=np.int32)
     result = np.empty((len(hcpevec)), dtype=np.float32)
     value = np.empty((len(hcpevec)), dtype=np.float32)
@@ -230,12 +231,13 @@ for e in range(args.epoch):
                     loss1.item(), loss2.item(), loss3.item(), loss.item(),
                     accuracy(y1, t1), binary_accuracy(y2, t2)))
 
-                wandb.log({
-                    'epoch': epoch+1,
-                    'iteration': t,
-                    'train/loss1': sum_loss1 / itr, 'train/loss2': sum_loss2 / itr, 'train/loss3': sum_loss3 / itr, 'train/loss': sum_loss /itr,
-                    'test/loss1':loss1.item(), 'test/loss2': loss2.item(), 'test/loss3': loss3.item(), 'test/loss': loss.item(),
-                    'test/accuracy': accuracy(y1, t1), 'test/binary_accuracy': binary_accuracy(y2, t2),
+                if args.project != "None":
+                    wandb.log({
+                        'epoch': epoch+1,
+                        'iteration': t,
+                        'train/loss1': sum_loss1 / itr, 'train/loss2': sum_loss2 / itr, 'train/loss3': sum_loss3 / itr, 'train/loss': sum_loss /itr,
+                        'test/loss1':loss1.item(), 'test/loss2': loss2.item(), 'test/loss3': loss3.item(), 'test/loss': loss.item(),
+                        'test/accuracy': accuracy(y1, t1), 'test/binary_accuracy': binary_accuracy(y2, t2),
                 })
             itr = 0
             sum_loss1 = 0
@@ -298,13 +300,14 @@ for e in range(args.epoch):
             sum_test_accuracy1 / itr_test, sum_test_accuracy2 / itr_test,
             sum_test_entropy1 / itr_test, sum_test_entropy2 / itr_test))
 
-        wandb.log({
-            'epoch': epoch+1,
-            'iteration': t,
-            'swa_train/loss1': sum_loss1_epoch / itr_epoch, 'swa_train/loss2': sum_loss2_epoch / itr_epoch, 'swa_train/loss3': sum_loss3_epoch / itr_epoch, 'swa_train/loss': sum_loss_epoch /itr_epoch,
-            'swa_test/loss1': sum_test_loss1 / itr_test, 'swa_test/loss2': sum_test_loss2 / itr_test, 'swa_test/loss3': sum_test_loss3 / itr_test, 'swa_test/loss': sum_test_loss / itr_test,
-            'swa_test/accuracy': sum_test_accuracy1 / itr_test, 'swa_test/binary_accuracy': sum_test_accuracy2 / itr_test,
-            'swa_test/entropy1': sum_test_entropy1 / itr_test, 'swa_test/entropy2': sum_test_entropy2 / itr_test,
+        if args.project != "None":
+            wandb.log({
+                'epoch': epoch+1,
+                'iteration': t,
+                'swa_train/loss1': sum_loss1_epoch / itr_epoch, 'swa_train/loss2': sum_loss2_epoch / itr_epoch, 'swa_train/loss3': sum_loss3_epoch / itr_epoch, 'swa_train/loss': sum_loss_epoch /itr_epoch,
+                'swa_test/loss1': sum_test_loss1 / itr_test, 'swa_test/loss2': sum_test_loss2 / itr_test, 'swa_test/loss3': sum_test_loss3 / itr_test, 'swa_test/loss': sum_test_loss / itr_test,
+                'swa_test/accuracy': sum_test_accuracy1 / itr_test, 'swa_test/binary_accuracy': sum_test_accuracy2 / itr_test,
+                'swa_test/entropy1': sum_test_entropy1 / itr_test, 'swa_test/entropy2': sum_test_entropy2 / itr_test,
         })
 
     epoch += 1
@@ -324,4 +327,5 @@ if args.use_amp:
     state['scaler_state_dict'] = scaler.state_dict()
 torch.save(state, args.state)
 
-wandb.save('dlmodel.h5')
+if args.project != "None":
+    wandb.save('dlmodel.h5')
