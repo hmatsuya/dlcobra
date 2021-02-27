@@ -256,3 +256,4 @@ model/*
 .ipynb_checkpoints
 __pycache__
 dlshogi/wandb
+*.bak
