@@ -44,17 +44,12 @@ inline void make_input_features(const Position& position, features1_t* features1
 				if (bb[pt].isSet(sq)) {
 					(*features1)[c2][pt - 1][sq2] = 1;
 				}
-
-				// 駒の利き
-				if (attacks[c][pt].isSet(sq)) {
-					(*features1)[c2][PIECETYPE_NUM + pt - 1][sq2] = 1;
-				}
 			}
 
 			// 利き数
 			const int num = std::min(MAX_ATTACK_NUM, position.attackersTo(c, sq, occupied_bb).popCount());
 			for (int k = 0; k < num; k++) {
-				(*features1)[c2][PIECETYPE_NUM + PIECETYPE_NUM + k][sq2] = 1;
+				(*features1)[c2][PIECETYPE_NUM + k][sq2] = 1;
 			}
 		}
 
