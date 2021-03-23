@@ -2,16 +2,18 @@
 import torch
 import torch.optim as optim
 
+from dlshogi import cppshogi
 from dlshogi import serializers
 from dlshogi.swa import SWA
 from dlshogi.data_loader import DataLoader
 
 import argparse
-import random
 
 import logging
 
 import wandb
+import sys
+import os
 
 parser = argparse.ArgumentParser(description='Traning RL policy network using hcpe')
 parser.add_argument('train_data', type=str, nargs='+', help='train data file')
@@ -37,15 +39,17 @@ parser.add_argument('--swa_freq', type=int, default=250)
 parser.add_argument('--swa_n_avr', type=int, default=10)
 parser.add_argument('--swa_lr', type=float)
 parser.add_argument('--use_amp', action='store_true', help='Use automatic mixed precision')
-parser.add_argument('--project', type=str, default='meijincobra', help='Project name for logging with wandb')
+parser.add_argument('--project', type=str, default=None, help='Project name for logging with wandb')
 parser.add_argument('--run_id', type=str, default='dlshogi', help='Run ID for logging with wandb')
 args = parser.parse_args()
 
 os.environ["WANDB_RESUME"] = "allow"
 # os.environ["WANDB_RUN_ID"] = wandb.util.generate_id()
 os.environ["WANDB_RUN_ID"] = f'{args.run_id}'
-wandb.init(project=args.project)
-wandb.config.update(args)
+
+if args.project is not None:
+    wandb.init(project=args.project)
+    wandb.config.update(args)
 
 if args.network == 'wideresnet15':
     from dlshogi.policy_value_network_wideresnet15 import *
@@ -58,7 +62,17 @@ elif args.network == 'resnet20_swish':
 else:
     from dlshogi.policy_value_network import *
 
-logging.basicConfig(format='%(asctime)s\t%(levelname)s\t%(message)s', datefmt='%Y/%m/%d %H:%M:%S', filename=args.log, level=logging.DEBUG)
+# logging.basicConfig(format='%(asctime)s\t%(levelname)s\t%(message)s', datefmt='%Y/%m/%d %H:%M:%S', filename=args.log, level=logging.DEBUG)
+logging.basicConfig(
+    format='%(asctime)s\t%(levelname)s\t%(message)s',
+    datefmt='%Y/%m/%d %H:%M:%S',
+    handlers = [
+        logging.FileHandler(args.log),
+        logging.StreamHandler(sys.stdout)
+    ],
+    level=logging.INFO,
+)
+
 logging.info('batchsize={}'.format(args.batchsize))
 logging.info('MomentumSGD(lr={})'.format(args.lr))
 logging.info('WeightDecay(rate={})'.format(args.weightdecay_rate))
@@ -102,6 +116,7 @@ else:
 
 logging.debug('read teacher data')
 train_data = DataLoader.load_files(args.train_data)
+priorities = np.ones(len(train_data))
 logging.debug('read test data')
 logging.debug(args.test_data)
 test_data = np.fromfile(args.test_data, dtype=HuffmanCodedPosAndEval)
@@ -111,6 +126,74 @@ logging.info('test position num = {}'.format(len(test_data)))
 
 train_dataloader = DataLoader(train_data, args.batchsize, device, shuffle=True)
 test_dataloader = DataLoader(test_data, args.testbatchsize, device)
+
+def mini_batch2(hcpevec, prios, model, batch_size, prob_alpha=0.6, beta=0.4, loss1_beta=0.001):
+
+    probs = prios ** prob_alpha
+    probs /= probs.sum()
+
+    indices = np.random.choice(len(hcpevec), batch_size, p=probs)
+    #samples = np.array([hcpevec[idx] for idx in indices], dtype=np.float32)
+    samples = hcpevec[indices]
+
+    total = len(hcpevec)
+    weights = (total * probs[indices]) ** (-beta)
+    weights /= weights.max();
+    weights = np.array(weights, dtype=np.float32)
+    weights = torch.tensor(weights).to(device)
+
+    features1 = np.empty((len(samples), FEATURES1_NUM, 9, 9), dtype=np.float32)
+    features2 = np.empty((len(samples), FEATURES2_NUM, 9, 9), dtype=np.float32)
+    move = np.empty((len(samples)), dtype=np.int32)
+    result = np.empty((len(samples)), dtype=np.float32)
+    value = np.empty((len(samples)), dtype=np.float32)
+
+    cppshogi.hcpe_decode_with_value(samples, features1, features2, move, result, value)
+
+    z = result.astype(np.float32) - value + 0.5
+
+    #x1, x2, t1, t2, z, value = mini_batch(train_data[i:i+args.batchsize])
+
+    x1, x2, t1, t2, z, value = (torch.tensor(features1).to(device),
+            torch.tensor(features2).to(device),
+            torch.tensor(move.astype(np.int64)).to(device),
+            torch.tensor(result.reshape((len(samples), 1))).to(device),
+            torch.tensor(z).to(device),
+            torch.tensor(value.reshape((len(value), 1))).to(device)
+            )
+    y1, y2 = model(x1, x2)
+
+    logging.debug(f"x1: {x1.shape}")
+    logging.debug(f"x2: {x2.shape}")
+    logging.debug(f"t1: {t1.shape}")
+    logging.debug(f"t2: {t2.shape}")
+    logging.debug(f"z: {z.shape}")
+    logging.debug(f"value: {value.shape}")
+    logging.debug(f"y1: {y1.shape}")
+    logging.debug(f"y2: {y2.shape}")
+
+    model.zero_grad()
+    loss1 = (cross_entropy_loss(y1, t1) * z).mean()
+    if loss1_beta > 0:
+        loss1 += loss1_beta * (F.softmax(y1, dim=1) * F.log_softmax(y1, dim=1)).sum(dim=1).mean()
+    loss2 = bce_with_logits_loss(y2, t2)
+    loss3 = bce_with_logits_loss(y2, value)
+    loss = loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3
+    logging.debug(loss1.shape)
+    logging.debug(loss2.shape)
+    logging.debug(loss3.shape)
+    logging.debug(loss.shape)
+    logging.debug(weights.shape)
+    # loss *= weights
+
+    return (x1, x2, t1, t2, z, value, loss, loss1, loss2, loss3, priorities)
+
+def update_priorities(priorities, batch_indices, batch_priorities):
+    for idx, prio in zip(batch_indices, batch_priorities):
+        priorities[idx] = prio
+    return priorities
+
+
 
 # for SWA bn_update
 def hcpe_loader(data, batchsize):
@@ -132,6 +215,11 @@ sum_loss2 = 0
 sum_loss3 = 0
 sum_loss = 0
 eval_interval = args.eval_interval
+
+# for early stopping
+best_loss = 9999.0
+best_epoch = 1
+
 for e in range(args.epoch):
     itr_epoch = 0
     sum_loss1_epoch = 0
@@ -191,13 +279,14 @@ for e in range(args.epoch):
                     loss1.item(), loss2.item(), loss3.item(), loss.item(),
                     accuracy(y1, t1), binary_accuracy(y2, t2)))
 
-                wandb.log({
-                    'epoch': epoch+1,
-                    'iteration': t,
-                    'train/loss1': sum_loss1 / itr, 'train/loss2': sum_loss2 / itr, 'train/loss3': sum_loss3 / itr, 'train/loss': sum_loss /itr,
-                    'test/loss1':loss1.item(), 'test/loss2': loss2.item(), 'test/loss3': loss3.item(), 'test/loss': loss.item(),
-                    'test/accuracy': accuracy(y1, t1), 'test/binary_accuracy': binary_accuracy(y2, t2),
-                })
+                if args.project is not None:
+                    wandb.log({
+                        'epoch': epoch+1,
+                        'iteration': t,
+                        'train/loss1': sum_loss1 / itr, 'train/loss2': sum_loss2 / itr, 'train/loss3': sum_loss3 / itr, 'train/loss': sum_loss /itr,
+                        'test/loss1':loss1.item(), 'test/loss2': loss2.item(), 'test/loss3': loss3.item(), 'test/loss': loss.item(),
+                        'test/accuracy': accuracy(y1, t1), 'test/binary_accuracy': binary_accuracy(y2, t2),
+                    })
             itr = 0
             sum_loss1 = 0
             sum_loss2 = 0
@@ -253,14 +342,38 @@ for e in range(args.epoch):
             sum_test_accuracy1 / itr_test, sum_test_accuracy2 / itr_test,
             sum_test_entropy1 / itr_test, sum_test_entropy2 / itr_test))
 
-        wandb.log({
-            'epoch': epoch+1,
-            'iteration': t,
-            'swa_train/loss1': sum_loss1_epoch / itr_epoch, 'swa_train/loss2': sum_loss2_epoch / itr_epoch, 'swa_train/loss3': sum_loss3_epoch / itr_epoch, 'swa_train/loss': sum_loss_epoch /itr_epoch,
-            'swa_test/loss1': sum_test_loss1 / itr_test, 'swa_test/loss2': sum_test_loss2 / itr_test, 'swa_test/loss3': sum_test_loss3 / itr_test, 'swa_test/loss': sum_test_loss / itr_test,
-            'swa_test/accuracy': sum_test_accuracy1 / itr_test, 'swa_test/binary_accuracy': sum_test_accuracy2 / itr_test,
-            'swa_test/entropy1': sum_test_entropy1 / itr_test, 'swa_test/entropy2': sum_test_entropy2 / itr_test,
-        })
+        if args.project is not None:
+            wandb.log({
+                'epoch': epoch+1,
+                'iteration': t,
+                'swa_train/loss1': sum_loss1_epoch / itr_epoch, 'swa_train/loss2': sum_loss2_epoch / itr_epoch, 'swa_train/loss3': sum_loss3_epoch / itr_epoch, 'swa_train/loss': sum_loss_epoch /itr_epoch,
+                'swa_test/loss1': sum_test_loss1 / itr_test, 'swa_test/loss2': sum_test_loss2 / itr_test, 'swa_test/loss3': sum_test_loss3 / itr_test, 'swa_test/loss': sum_test_loss / itr_test,
+                'swa_test/accuracy': sum_test_accuracy1 / itr_test, 'swa_test/binary_accuracy': sum_test_accuracy2 / itr_test,
+                'swa_test/entropy1': sum_test_entropy1 / itr_test, 'swa_test/entropy2': sum_test_entropy2 / itr_test,
+            })
+
+    # early stopping
+    if (sum_test_loss / itr_test) > best_loss:
+        if (epoch - best_epoch) >= 1:
+            break
+    else:
+        best_loss = (sum_test_loss / itr_test)
+        best_epoch = epoch
+
+        print('save the model')
+        serializers.save_npz(args.model, model)
+        print('save the optimizer')
+        state = {
+            'epoch': epoch + 1,
+            't': t,
+            'optimizer_state_dict': base_optimizer.state_dict(),
+            }
+        if args.use_amp:
+            state['scaler_state_dict'] = scaler.state_dict()
+        torch.save(state, args.state)
+
+        if args.project is not None:
+            wandb.save('dlmodel.h5')
 
     epoch += 1
 
