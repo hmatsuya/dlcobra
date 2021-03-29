@@ -93,7 +93,8 @@ if args.use_swa:
 else:
     optimizer = base_optimizer
 cross_entropy_loss = torch.nn.CrossEntropyLoss(reduction='none')
-bce_with_logits_loss = torch.nn.BCEWithLogitsLoss()
+# bce_with_logits_loss = torch.nn.BCEWithLogitsLoss()
+bce_with_logits_loss = torch.nn.BCEWithLogitsLoss(reduction='none')
 if args.use_amp:
     logging.info('use amp')
 scaler = torch.cuda.amp.GradScaler(enabled=args.use_amp)
@@ -127,7 +128,8 @@ logging.info('test position num = {}'.format(len(test_data)))
 train_dataloader = DataLoader(train_data, args.batchsize, device, shuffle=True)
 test_dataloader = DataLoader(test_data, args.testbatchsize, device)
 
-def mini_batch2(hcpevec, prios, model, batch_size, prob_alpha=0.6, beta=0.4, loss1_beta=0.001):
+# def mini_batch2(hcpevec, prios, model, batch_size, prob_alpha=0.6, beta=0.4, loss1_beta=0.001):
+def mini_batch2(hcpevec, prios, model, batch_size, prob_alpha=0.6, beta=0.0, loss1_beta=0.001):
 
     probs = prios ** prob_alpha
     probs /= probs.sum()
@@ -138,7 +140,8 @@ def mini_batch2(hcpevec, prios, model, batch_size, prob_alpha=0.6, beta=0.4, los
 
     total = len(hcpevec)
     weights = (total * probs[indices]) ** (-beta)
-    weights /= weights.max();
+    weights /= weights.max()
+    # weights = np.array([weights], dtype=np.float32).T
     weights = np.array(weights, dtype=np.float32)
     weights = torch.tensor(weights).to(device)
 
@@ -173,17 +176,24 @@ def mini_batch2(hcpevec, prios, model, batch_size, prob_alpha=0.6, beta=0.4, los
     logging.debug(f"y2: {y2.shape}")
 
     model.zero_grad()
-    loss1 = (cross_entropy_loss(y1, t1) * z).mean()
+    # loss1 = (cross_entropy_loss(y1, t1) * z).mean()
+    loss1 = (cross_entropy_loss(y1, t1) * z * weights).mean()
     if loss1_beta > 0:
         loss1 += loss1_beta * (F.softmax(y1, dim=1) * F.log_softmax(y1, dim=1)).sum(dim=1).mean()
-    loss2 = bce_with_logits_loss(y2, t2)
-    loss3 = bce_with_logits_loss(y2, value)
-    loss = loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3
+    # loss2 = bce_with_logits_loss(y2, t2)
+    loss2 = (bce_with_logits_loss(y2, t2) * weights).mean()
+    # loss3 = bce_with_logits_loss(y2, value)
+    loss3 = (bce_with_logits_loss(y2, value) * weights).mean()
     logging.debug(loss1.shape)
+    logging.debug(loss2)
     logging.debug(loss2.shape)
     logging.debug(loss3.shape)
-    logging.debug(loss.shape)
+    logging.debug(type(weights))
     logging.debug(weights.shape)
+    loss = loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3
+    # loss = (loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3) * weights
+    logging.debug(type(loss))
+    logging.debug(loss.shape)
     # loss *= weights
 
     return (x1, x2, t1, t2, z, value, loss, loss1, loss2, loss3, priorities)
@@ -231,7 +241,8 @@ for e in range(args.epoch):
             model.train()
 
             y1, y2 = model(x1, x2)
-            z = t2.view(-1) - value.view(-1) + 0.5
+            # z = t2.view(-1) - value.view(-1) + 0.5
+            z = 1.0
 
             model.zero_grad()
             loss1 = (cross_entropy_loss(y1, t1) * z).mean()
@@ -268,15 +279,17 @@ for e in range(args.epoch):
             with torch.no_grad():
                 y1, y2 = model(x1, x2)
 
-                loss1 = cross_entropy_loss(y1, t1).mean()
-                loss2 = bce_with_logits_loss(y2, t2)
-                loss3 = bce_with_logits_loss(y2, value)
+                loss1 = (cross_entropy_loss(y1, t1) * z).mean()
+                loss2 = bce_with_logits_loss(y2, t2).mean()
+                loss3 = bce_with_logits_loss(y2, value).mean()
                 loss = loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3
 
-                logging.info('epoch = {}, iteration = {}, loss = {:.08f}, {:.08f}, {:.08f}, {:.08f}, test loss = {:.08f}, {:.08f}, {:.08f}, {:.08f}, test accuracy = {:.08f}, {:.08f}'.format(
+                # logging.info('epoch = {}, iteration = {}, loss = {:.08f}, {:.08f}, {:.08f}, {:.08f}, test loss = {:.08f}, {:.08f}, {:.08f}, {:.08f}, test accuracy = {:.08f}, {:.08f}'.format(
+                logging.info('epoch = {}, iteration = {}, loss = {}, {}, {}, {}, test loss = {}, {}, {}, {}, test accuracy = {}, {}'.format(
                     epoch + 1, t,
                     sum_loss1 / itr, sum_loss2 / itr, sum_loss3 / itr, sum_loss / itr,
-                    loss1.item(), loss2.item(), loss3.item(), loss.item(),
+                    # loss1.item(), loss2.item(), loss3.item(), loss.item(),
+                    loss1, loss2, loss3, loss,
                     accuracy(y1, t1), binary_accuracy(y2, t2)))
 
                 if args.project is not None:
@@ -315,9 +328,9 @@ for e in range(args.epoch):
             y1, y2 = model(x1, x2)
 
             itr_test += 1
-            loss1 = cross_entropy_loss(y1, t1).mean()
-            loss2 = bce_with_logits_loss(y2, t2)
-            loss3 = bce_with_logits_loss(y2, value)
+            loss1 = (cross_entropy_loss(y1, t1) * z).mean()
+            loss2 = bce_with_logits_loss(y2, t2).mean()
+            loss3 = bce_with_logits_loss(y2, value).mean()
             loss = loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3
             sum_test_loss1 += loss1.item()
             sum_test_loss2 += loss2.item()
