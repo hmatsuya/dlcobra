@@ -235,13 +235,21 @@ def matches(args):
         # 勝敗カウント
         if n % 2 == 0 and win == cshogi.BLACK or n % 2 == 1 and win == cshogi.WHITE:
             win_count += 1
+            print('O', end='', flush=True)
         elif win == 2:
             draw_count += 1
+            print('-', end='', flush=True)
+        else:
+            print('X', end='', flush=True)
+
 
         if n + 1 == draw_count:
             win_rate = 0.0
         else:
             win_rate = win_count / (n + 1 - draw_count)
+
+        if (n+1) % 10 == 0:
+            print(f' {win_rate:.3}', flush=True)
 
         logging.info('game {} result : win = {}, win count = {}, draw count = {}, win rate = {:.1f}%'.format(
             n, win, win_count, draw_count, win_rate * 100))
