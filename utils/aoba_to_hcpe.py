@@ -13,6 +13,7 @@ from scipy.special import logit
 parser = argparse.ArgumentParser()
 parser.add_argument('csa_dir')
 parser.add_argument('out_dir')
+parser.add_argument('use_value', action='store_true')
 args = parser.parse_args()
 
 def get_values(comments):
@@ -65,14 +66,15 @@ for filepath in csa_file_list:
     for kif in CSA.Parser.parse_file(file):
         if kif.endgame not in ('%TORYO', '%SENNICHITE', '%KACHI', '%HIKIWAKE', '%CHUDAN') or len(kif.moves) <= 30:
             continue
-
-        # parse values
-        values = get_values(kif.comments)
-        if len(values) != len(kif.moves):
-            print(len(values), len(kif.moves), flush=True)
-            continue
-        ewma = value_ewma(values)
-        score = value_to_score(ewma)
+            
+        if args.use_value:
+            # parse values
+            values = get_values(kif.comments)
+            if len(values) != len(kif.moves):
+                print(len(values), len(kif.moves), flush=True)
+                continue
+            ewma = value_ewma(values)
+            score = value_to_score(ewma)
 
         kif_num += 1
         board.set_sfen(kif.sfen)
@@ -107,7 +109,8 @@ for filepath in csa_file_list:
             board.to_hcp(hcpe['hcp'])
             hcpe['bestMove16'] = move16(move)
             hcpe['gameResult'] = kif.win
-            hcpe['eval'] = round(score[i])
+            if args.use_value:
+                hcpe['eval'] = round(score[i])
             p += 1
             board.push(move)
 
