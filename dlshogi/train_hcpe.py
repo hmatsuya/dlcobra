@@ -14,6 +14,8 @@ import logging
 import wandb
 import sys
 import os
+from .prioritized_memory import Memory
+import pandas as pd
 
 parser = argparse.ArgumentParser(description='Traning RL policy network using hcpe')
 parser.add_argument('train_data', type=str, nargs='+', help='train data file')
@@ -41,6 +43,9 @@ parser.add_argument('--swa_lr', type=float)
 parser.add_argument('--use_amp', action='store_true', help='Use automatic mixed precision')
 parser.add_argument('--project', type=str, default=None, help='Project name for logging with wandb')
 parser.add_argument('--run_id', type=str, default='dlshogi', help='Run ID for logging with wandb')
+parser.add_argument('--memory_beta', '-mb', type=float, default=0.4, help='beta coefficient for prioritized merory')
+parser.add_argument('--memory_beta_inc', '-mi', type=float, default=0.0001, help='beta coefficient increment for prioritized merory')
+parser.add_argument('--memory_alpha', '-ma', type=float, default=0.6, help='alpha coefficient for prioritized merory')
 args = parser.parse_args()
 
 os.environ["WANDB_RESUME"] = "allow"
@@ -116,8 +121,25 @@ else:
     t = 0
 
 logging.debug('read teacher data')
-train_data = DataLoader.load_files(args.train_data)
+# train_data = DataLoader.load_files(args.train_data)
+def load_teacher(files, init_loss=1.0):
+    data = []
+    for path in files:
+        if os.path.exists(path):
+            logging.debug(path)
+            data.append(np.fromfile(path, dtype=HuffmanCodedPosAndEval))
+        else:
+            logging.debug('{} not found, skipping'.format(path))
+    all = np.concatenate(data)
+    memory = Memory(len(all), beta=args.memory_beta, beta_anneal_step=args.memory_beta_inc, alpha=args.alpha)
+    # for d in np.fromfile(path, dtype=HuffmanCodedPosAndEval):
+    for d in all:
+        memory.add(init_loss, None)
+    return (all, memory)
+
+train_data, memory = load_teacher(args.train_data)
 priorities = np.ones(len(train_data))
+
 logging.debug('read test data')
 logging.debug(args.test_data)
 test_data = np.fromfile(args.test_data, dtype=HuffmanCodedPosAndEval)
@@ -128,21 +150,12 @@ logging.info('test position num = {}'.format(len(test_data)))
 train_dataloader = DataLoader(train_data, args.batchsize, device, shuffle=True)
 test_dataloader = DataLoader(test_data, args.testbatchsize, device)
 
-# def mini_batch2(hcpevec, prios, model, batch_size, prob_alpha=0.6, beta=0.4, loss1_beta=0.001):
-def mini_batch2(hcpevec, prios, model, batch_size, prob_alpha=0.6, beta=0.0, loss1_beta=0.001):
+def mini_batch2(train_data, memory, model, batch_size, prob_alpha=0.6, beta=0.0, loss1_beta=0.001):
 
-    probs = prios ** prob_alpha
-    probs /= probs.sum()
+    _, idxs, weights = memory.sample(batch_size)
+    fixed_idxs = list(map(lambda x: x - memory.capacity + 1, idxs))
+    samples = train_data[fixed_idxs]
 
-    indices = np.random.choice(len(hcpevec), batch_size, p=probs)
-    #samples = np.array([hcpevec[idx] for idx in indices], dtype=np.float32)
-    samples = hcpevec[indices]
-
-    total = len(hcpevec)
-    weights = (total * probs[indices]) ** (-beta)
-    weights /= weights.max()
-    # weights = np.array([weights], dtype=np.float32).T
-    weights = np.array(weights, dtype=np.float32)
     weights = torch.tensor(weights).to(device)
 
     features1 = np.empty((len(samples), FEATURES1_NUM, 9, 9), dtype=np.float32)
@@ -153,7 +166,8 @@ def mini_batch2(hcpevec, prios, model, batch_size, prob_alpha=0.6, beta=0.0, los
 
     cppshogi.hcpe_decode_with_value(samples, features1, features2, move, result, value)
 
-    z = result.astype(np.float32) - value + 0.5
+    # z = result.astype(np.float32) - value + 0.5
+    z = result.astype(np.float32)
 
     #x1, x2, t1, t2, z, value = mini_batch(train_data[i:i+args.batchsize])
 
@@ -166,42 +180,37 @@ def mini_batch2(hcpevec, prios, model, batch_size, prob_alpha=0.6, beta=0.0, los
             )
     y1, y2 = model(x1, x2)
 
-    logging.debug(f"x1: {x1.shape}")
-    logging.debug(f"x2: {x2.shape}")
-    logging.debug(f"t1: {t1.shape}")
-    logging.debug(f"t2: {t2.shape}")
-    logging.debug(f"z: {z.shape}")
-    logging.debug(f"value: {value.shape}")
-    logging.debug(f"y1: {y1.shape}")
-    logging.debug(f"y2: {y2.shape}")
-
     model.zero_grad()
-    # loss1 = (cross_entropy_loss(y1, t1) * z).mean()
-    loss1 = (cross_entropy_loss(y1, t1) * z * weights).mean()
+    loss1 = (cross_entropy_loss(y1, t1) * z)
+    loss2 = (bce_with_logits_loss(y2, t2).flatten())
+    loss3 = (bce_with_logits_loss(y2, value).flatten())
+    logging.debug(f'y1: {y1[:30]}')
+    logging.debug(f't1: {t1[:30]}')
+    logging.debug(f'z: {z[:30]}')
+    logging.debug(f'loss1: {loss1[:30]}')
+    logging.debug(f'loss2: {loss2[:30]}')
+    logging.debug(f'loss3: {loss3[:30]}')
+    # logging.debug(f't1: {pd.Series(t1.cpu().detach().numpy()).describe()}')
+    logging.debug(f'z: {pd.Series(z.cpu().detach().numpy()).describe()}')
+    logging.debug(f'loss1: {pd.Series(loss1.cpu().detach().numpy()).describe()}')
+    logging.debug(f'loss2: {pd.Series(loss2.cpu().detach().numpy()).describe()}')
+    logging.debug(f'loss2: {pd.Series(loss2.cpu().detach().numpy()).describe()}')
+
+    error = (loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3).detach().cpu()
+    for i, e in enumerate(error):
+        idx = idxs[i]
+        # memory.update(idx, max(0, e))
+        memory.update(idx, e)
+
+    loss1 = (loss1 * weights).mean()
     if loss1_beta > 0:
         loss1 += loss1_beta * (F.softmax(y1, dim=1) * F.log_softmax(y1, dim=1)).sum(dim=1).mean()
-    # loss2 = bce_with_logits_loss(y2, t2)
-    loss2 = (bce_with_logits_loss(y2, t2) * weights).mean()
-    # loss3 = bce_with_logits_loss(y2, value)
-    loss3 = (bce_with_logits_loss(y2, value) * weights).mean()
-    logging.debug(loss1.shape)
-    logging.debug(loss2)
-    logging.debug(loss2.shape)
-    logging.debug(loss3.shape)
-    logging.debug(type(weights))
-    logging.debug(weights.shape)
+    loss2 = (loss2 * weights).mean()
+    loss3 = (loss3 * weights).mean()
+
     loss = loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3
-    # loss = (loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3) * weights
-    logging.debug(type(loss))
-    logging.debug(loss.shape)
-    # loss *= weights
 
-    return (x1, x2, t1, t2, z, value, loss, loss1, loss2, loss3, priorities)
-
-def update_priorities(priorities, batch_indices, batch_priorities):
-    for idx, prio in zip(batch_indices, batch_priorities):
-        priorities[idx] = prio
-    return priorities
+    return (x1, x2, t1, t2, z, value, loss, loss1, loss2, loss3)
 
 
 
@@ -231,6 +240,8 @@ best_loss = 9999.0
 best_epoch = 1
 
 for e in range(args.epoch):
+    # np.random.shuffle(train_data)
+
     itr_epoch = 0
     sum_loss1_epoch = 0
     sum_loss2_epoch = 0
@@ -240,9 +251,12 @@ for e in range(args.epoch):
         with torch.cuda.amp.autocast(enabled=args.use_amp):
             model.train()
 
-            y1, y2 = model(x1, x2)
             # z = t2.view(-1) - value.view(-1) + 0.5
             z = 1.0
+            # x1, x2, t1, t2, z, value = mini_batch(train_data[i:i+args.batchsize])
+            # y1, y2 = model(x1, x2)
+
+            x1, x2, t1, t2, z, value, loss, loss1, loss2, loss3 = mini_batch2(train_data, memory, model, args.batchsize, loss1_beta=args.beta)
 
             model.zero_grad()
             loss1 = (cross_entropy_loss(y1, t1) * z).mean()
@@ -309,8 +323,14 @@ for e in range(args.epoch):
     if args.use_swa:
         optimizer.swap_swa_sgd()
 
-        with torch.cuda.amp.autocast(enabled=args.use_amp):
-            optimizer.bn_update(hcpe_loader(train_data, args.batchsize), model)
+    if args.use_amp:
+        amp_context = torch.cuda.amp.autocast()
+        amp_context.__enter__()
+
+    optimizer.bn_update(hcpe_loader(train_data, args.batchsize), model)
+
+    with torch.cuda.amp.autocast(enabled=args.use_amp):
+        optimizer.bn_update(hcpe_loader(train_data, args.batchsize), model)
 
     # print train loss for each epoch
     itr_test = 0
