@@ -131,7 +131,7 @@ def load_teacher(files, init_loss=1.0):
         else:
             logging.debug('{} not found, skipping'.format(path))
     all = np.concatenate(data)
-    memory = Memory(len(all), beta=args.memory_beta, beta_anneal_step=args.memory_beta_inc, alpha=args.alpha)
+    memory = Memory(len(all), beta=args.memory_beta, beta_anneal_step=args.memory_beta_inc, alpha=args.memory_alpha)
     # for d in np.fromfile(path, dtype=HuffmanCodedPosAndEval):
     for d in all:
         memory.add(init_loss, None)
