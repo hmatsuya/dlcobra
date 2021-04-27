@@ -50,7 +50,7 @@ void SetPonderingMode(bool flag);
 
 
 // 使用するスレッド数の指定
-constexpr int max_gpu = 8;
+constexpr int max_gpu = 16;
 void SetThread(const int new_thread[max_gpu], const int new_policy_value_batch_maxsize[max_gpu]);
 
 
