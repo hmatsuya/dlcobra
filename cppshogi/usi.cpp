@@ -155,9 +155,9 @@ void OptionsMap::init(Searcher* s) {
 #endif // !MAKE_BOOK
     (*this)["DebugMessage"]                = USIOption(false);
 #ifdef NDEBUG
-    (*this)["Engine_Name"]                 = USIOption("dlshogi");
+    (*this)["Engine_Name"]                 = USIOption("Meijin Cobra");
 #else
-    (*this)["Engine_Name"]                 = USIOption("dlshogi Debug Build");
+    (*this)["Engine_Name"]                 = USIOption("Meijin Cobra Debug Build");
 #endif
 }
 
