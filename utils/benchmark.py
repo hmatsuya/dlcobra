@@ -1,5 +1,6 @@
 from cshogi.usi import Engine
 import argparse
+import numpy as np
 
 parser = argparse.ArgumentParser()
 parser.add_argument('engine')
@@ -11,7 +12,19 @@ parser.add_argument('--batch', type=int, default=128)
 parser.add_argument('--options')
 args = parser.parse_args()
 
-engine = Engine(args.engine, debug=True)
+class Listener:
+    def __init__(self):
+        self.info = self.bestmove = ''
+
+    def __call__(self, line):
+        print(line, flush=True)
+        self.info = self.bestmove
+        self.bestmove = line
+
+listener = Listener()
+nps = []
+
+engine = Engine(args.engine, debug=False) # debug should be False to collect npm statistics
 engine.setoption('USI_Ponder', 'false')
 engine.setoption('Resign_Threshold', '0')
 engine.setoption('PV_Interval', '0')
@@ -27,7 +40,7 @@ if args.options:
     for option in args.options.split(','):
         name, value = option.split(':')
         engine.setoption(name, value)
-engine.isready()
+engine.isready(listener=listener)
 
 positions = [
     '',
@@ -132,7 +145,20 @@ positions = [
     '3i4h 5a6b 2h1h 6b7b 7i6h 3c3d 8g8f 8c8d 6i7i 8d8e',
 ]
 
+def get_nps(info):
+    if info.startswith('info nps'):
+        return int(info.split(' ', 3)[2])
+    return None
+
 for moves in positions:
-    engine.position(moves=moves.split(' '))
-    engine.go(byoyomi=5000)
+    engine.position(moves=moves.split(' '), listener=listener)
+    engine.go(byoyomi=5000, listener=listener)
+    nps.append(get_nps(listener.info))
 engine.quit()
+
+print(nps)
+print(f'mean   NPS: {np.mean(nps)}')
+print(f'median NPS: {np.median(nps)}')
+print(f'min    NPS: {np.min(nps)}')
+print(f'max    NPS: {np.max(nps)}')
+print(f'std    NPS: {np.std(nps)}')
