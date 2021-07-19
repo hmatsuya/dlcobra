@@ -9,6 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import logging
 
+from dlshogi.prioritized_memory import Memory
+
 class DataLoader:
     @staticmethod
     def load_files(files):
@@ -188,3 +190,98 @@ class Hcpe3DataLoader(DataLoader):
                 self.torch_result.to(self.device),
                 self.torch_value.to(self.device)
                 )
+
+
+class Hcpe3DataLoaderPER(Hcpe3DataLoader):
+    @staticmethod
+    def load_files(files, use_average=False, use_evalfix=False, temperature=1.0):
+        if use_evalfix:
+            from scipy.optimize import curve_fit
+
+        actual_len = 0
+        for path in files:
+            if os.path.exists(path):
+                if use_evalfix:
+                    eval, result = cppshogi.hcpe3_prepare_evalfix(path)
+                    if (eval == 0).all():
+                        a = 0
+                        logging.debug('{}, skip evalfix'.format(path))
+                    else:
+                        popt, _ = curve_fit(score_to_value, eval, result, p0=[300.0])
+                        a = popt[0]
+                        logging.debug('{}, a={}'.format(path, a))
+                else:
+                    a = 0
+                    logging.debug(path)
+                sum_len, len_ = cppshogi.load_hcpe3(path, use_average, a, temperature)
+                if len_ == 0:
+                    raise RuntimeError('read error {}'.format(path))
+                actual_len += len_
+            else:
+                logging.debug('{} not found, skipping'.format(path))
+        return sum_len, actual_len
+
+    def __init__(self, data, batch_size, device, shuffle=True, beta=0.4, beta_inc = 0, alpha=0.6):
+        self.data = data
+        self.batch_size = batch_size
+        self.device = device
+        self.shuffle = shuffle
+
+        self.torch_features1 = torch.empty((batch_size, FEATURES1_NUM, 9, 9), dtype=torch.float32, pin_memory=True)
+        self.torch_features2 = torch.empty((batch_size, FEATURES2_NUM, 9, 9), dtype=torch.float32, pin_memory=True)
+        self.torch_probability = torch.empty((batch_size, 9*9*MAX_MOVE_LABEL_NUM), dtype=torch.float32, pin_memory=True)
+        self.torch_result = torch.empty((batch_size, 1), dtype=torch.float32, pin_memory=True)
+        self.torch_value = torch.empty((batch_size, 1), dtype=torch.float32, pin_memory=True)
+
+        self.features1 = self.torch_features1.numpy()
+        self.features2 = self.torch_features2.numpy()
+        self.probability = self.torch_probability.numpy()
+        self.result = self.torch_result.numpy().reshape(-1)
+        self.value = self.torch_value.numpy().reshape(-1)
+
+        self.i = 0
+        self.executor = ThreadPoolExecutor(max_workers=1)
+
+        self.memory = Memory(len(data), beta=beta, beta_anneal_step=beta_inc, alpha=alpha)
+        for d in data:
+            self.memory.add(1.0, d)
+
+    def mini_batch(self):
+
+        index, self.per_index, self.weights = self.memory.sample(self.batch_size)
+        index = np.array(index)
+        cppshogi.hcpe3_decode_with_value(index, self.features1, self.features2, self.probability, self.result, self.value)
+
+        return (self.torch_features1.to(self.device),
+                self.torch_features2.to(self.device),
+                self.torch_probability.to(self.device),
+                self.torch_result.to(self.device),
+                self.torch_value.to(self.device)
+                )
+
+    def sample(self):
+        return super.mini_batch(np.random.choice(self.data, self.batch_size, replace=False))
+
+    def pre_fetch(self):
+        self.i += self.batch_size
+        if len(self.data) < self.i:
+            return
+
+        self.f = self.executor.submit(self.mini_batch)
+
+    def __iter__(self):
+        self.i = 0
+        self.pre_fetch()
+        return self
+
+    def __next__(self):
+        if self.i > len(self.data):
+            raise StopIteration()
+
+        result = self.f.result()
+        self.pre_fetch()
+
+        return result
+
+    def update_error(self, error):
+        map(lambda i, e: self.memory.update(i, e), zip(self.per_index, error))

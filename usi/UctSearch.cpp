@@ -1163,6 +1163,10 @@ UCTSearcher::ParallelUctSearch()
 		}
 	} while (true);
 
+	if (monitoring_thread && pv_interval > 0) {
+		get_and_print_pv();
+	}
+
 	return;
 }
 

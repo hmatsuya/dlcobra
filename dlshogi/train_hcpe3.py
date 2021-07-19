@@ -5,6 +5,7 @@ import torch.optim as optim
 from dlshogi import serializers
 from dlshogi.swa import SWA
 from dlshogi.data_loader import Hcpe3DataLoader
+from dlshogi.data_loader import Hcpe3DataLoaderPER
 from dlshogi.data_loader import DataLoader
 
 import argparse
@@ -40,6 +41,9 @@ parser.add_argument('--use_amp', action='store_true', help='Use automatic mixed 
 parser.add_argument('--use_average', action='store_true')
 parser.add_argument('--use_evalfix', action='store_true')
 parser.add_argument('--temperature', type=float, default=1.0)
+parser.add_argument('--priority_beta', '-pb', type=float, default=0.4, help='beta coefficient for prioritized merory')
+parser.add_argument('--priority_beta_inc', '-pi', type=float, default=0.0001, help='beta coefficient increment for prioritized merory')
+parser.add_argument('--priority_alpha', '-pa', type=float, default=0.6, help='alpha coefficient for prioritized merory')
 args = parser.parse_args()
 
 if args.network == 'wideresnet15':
@@ -62,6 +66,9 @@ if args.use_critic:
 if args.beta:
     logging.info('entropy regularization coeff={}'.format(args.beta))
 logging.info('val_lambda={}'.format(args.val_lambda))
+logging.info(f'priority_beta={args.priority_beta}')
+logging.info(f'priority_beta_inc={args.priority_beta_inc}')
+logging.info(f'priority_alpha={args.priority_alpha}')
 
 if args.gpu >= 0:
     device = torch.device(f"cuda:{args.gpu}")
@@ -79,7 +86,7 @@ else:
 def cross_entropy_loss_with_soft_target(pred, soft_targets):
     return torch.sum(-soft_targets * F.log_softmax(pred, dim=1), 1)
 cross_entropy_loss = torch.nn.CrossEntropyLoss(reduction='none')
-bce_with_logits_loss = torch.nn.BCEWithLogitsLoss()
+bce_with_logits_loss = torch.nn.BCEWithLogitsLoss(reduction='none')
 if args.use_amp:
     logging.info('use amp')
 scaler = torch.cuda.amp.GradScaler(enabled=args.use_amp)
@@ -105,7 +112,7 @@ else:
     t = 0
 
 logging.debug('read teacher data')
-train_len, actual_len = Hcpe3DataLoader.load_files(args.train_data, args.use_average, args.use_evalfix, args.temperature)
+train_len, actual_len = Hcpe3DataLoaderPER.load_files(args.train_data, args.use_average, args.use_evalfix, args.temperature)
 train_data = np.arange(train_len, dtype=np.int32)
 logging.debug('read test data')
 test_data = np.fromfile(args.test_data, dtype=HuffmanCodedPosAndEval)
@@ -115,7 +122,7 @@ if args.use_average:
 logging.info('train position num = {}'.format(len(train_data)))
 logging.info('test position num = {}'.format(len(test_data)))
 
-train_dataloader = Hcpe3DataLoader(train_data, args.batchsize, device, shuffle=True)
+train_dataloader = Hcpe3DataLoaderPER(train_data, args.batchsize, device, shuffle=True, beta=args.memory_beta, beta_inc=args.memory_beta_inc, alpha=args.memory_alpha)
 test_dataloader = DataLoader(test_data, args.testbatchsize, device)
 
 # for SWA bn_update
@@ -151,17 +158,26 @@ for e in range(args.epoch):
             y1, y2 = model(x1, x2)
 
             model.zero_grad()
-            loss1 = cross_entropy_loss_with_soft_target(y1, t1)
+            weights = torch.tensor(train_dataloader.weights).to(device)
+            error1 = cross_entropy_loss_with_soft_target(y1, t1)
             if args.use_critic:
                 z = t2.view(-1) - value.view(-1) + 0.5
-                loss1 = (loss1 * z).mean()
+                error1 = error1 * z
+                loss1 = (error1 * weights).mean()
             else:
-                loss1 = loss1.mean()
+                loss1 = error1.mean()
+                loss1 = (error1 * weights).mean()
             if args.beta:
-                loss1 += args.beta * (F.softmax(y1, dim=1) * F.log_softmax(y1, dim=1)).sum(dim=1).mean()
-            loss2 = bce_with_logits_loss(y2, t2)
-            loss3 = bce_with_logits_loss(y2, value)
+                error1 += args.beta * (F.softmax(y1, dim=1) * F.log_softmax(y1, dim=1)).sum(dim=1)
+                loss1 = (error1 * weights).mean()
+            error2 = bce_with_logits_loss(y2, t2)
+            loss2 = (error2 * weights).mean()
+            error3 = bce_with_logits_loss(y2, value)
+            loss3 = (error3 * weights).mean()
             loss = loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3
+            error = (error1 + (1 - args.val_lambda) * error2 + args.val_lambda * error3).detach().cpu()
+
+        train_dataloader.update_error(error)
 
         scaler.scale(loss).backward()
         if args.clip_grad_max_norm:
@@ -191,10 +207,9 @@ for e in range(args.epoch):
                 y1, y2 = model(x1, x2)
 
                 loss1 = cross_entropy_loss(y1, t1).mean()
-                loss2 = bce_with_logits_loss(y2, t2)
-                loss3 = bce_with_logits_loss(y2, value)
+                loss2 = bce_with_logits_loss(y2, t2).mean()
+                loss3 = bce_with_logits_loss(y2, value).mean()
                 loss = loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3
-
                 logging.info('epoch = {}, iteration = {}, loss = {:.08f}, {:.08f}, {:.08f}, {:.08f}, test loss = {:.08f}, {:.08f}, {:.08f}, {:.08f}, test accuracy = {:.08f}, {:.08f}'.format(
                     epoch + 1, t,
                     sum_loss1 / itr, sum_loss2 / itr, sum_loss3 / itr, sum_loss / itr,
@@ -229,8 +244,8 @@ for e in range(args.epoch):
 
             itr_test += 1
             loss1 = cross_entropy_loss(y1, t1).mean()
-            loss2 = bce_with_logits_loss(y2, t2)
-            loss3 = bce_with_logits_loss(y2, value)
+            loss2 = bce_with_logits_loss(y2, t2).mean()
+            loss3 = bce_with_logits_loss(y2, value).mean()
             loss = loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3
             sum_test_loss1 += loss1.item()
             sum_test_loss2 += loss2.item()

@@ -39,9 +39,11 @@
     <Compile Include="policy_value_network_resnet10_swish.py" />
     <Compile Include="policy_value_network_resnet20_swish.py" />
     <Compile Include="policy_value_network_senet10.py" />
+    <Compile Include="prioritized_memory.py" />
     <Compile Include="serializers.py">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="sum_tree.py" />
     <Compile Include="swa.py">
       <SubType>Code</SubType>
     </Compile>
