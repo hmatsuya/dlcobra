@@ -48,7 +48,10 @@ elif args.network == 'resnet20_swish':
 else:
     from dlshogi.policy_value_network import *
 
-logging.basicConfig(format='%(asctime)s\t%(levelname)s\t%(message)s', datefmt='%Y/%m/%d %H:%M:%S', filename=args.log, level=logging.DEBUG)
+logging.basicConfig(
+    format='%(asctime)s\t%(levelname)s\t%(message)s', datefmt='%Y/%m/%d %H:%M:%S', level=logging.DEBUG,
+    handlers=[logging.FileHandler(args.log), logging.StreamHandler()],
+)
 logging.info('batchsize={}'.format(args.batchsize))
 logging.info('MomentumSGD(lr={})'.format(args.lr))
 logging.info('WeightDecay(rate={})'.format(args.weightdecay_rate))
@@ -166,7 +169,7 @@ for e in range(args.epoch):
         if t % eval_interval == 0:
             model.eval()
 
-        if t % eval_interval == 0 or (t == 1):
+            x1, x2, t1, t2, value = test_dataloader.sample()
             with torch.no_grad():
                 y1, y2 = model(x1, x2)
 
