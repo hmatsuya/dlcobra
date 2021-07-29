@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import torch
 import torch.optim as optim
 
@@ -166,7 +166,7 @@ for e in range(args.epoch):
         if t % eval_interval == 0:
             model.eval()
 
-            x1, x2, t1, t2, value = test_dataloader.sample()
+        if t % eval_interval == 0 or (t == 1):
             with torch.no_grad():
                 y1, y2 = model(x1, x2)
 
