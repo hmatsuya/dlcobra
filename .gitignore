@@ -1,7 +1,7 @@
 */.ipynb_checkpoints
 *.pyc
 model
-*/wandb
+**/wandb
 *.so
 *.vcxproj
 
