@@ -47,11 +47,11 @@ parser.add_argument('--swa_n_avr', type=int, default=10)
 parser.add_argument('--swa_lr', type=float)
 parser.add_argument('--use_amp', action='store_true', help='Use automatic mixed precision')
 parser.add_argument('--project', default='test', help='wandb project name')
-parser.add_argument('--run_name', type=str, default=None, help='wandb run id and name')
+parser.add_argument('--run_id', type=str, default=None, help='wandb run id and name')
 
 args = parser.parse_args()
 
-wandb.init(project=args.project, id=args.run_name, name=args.run_name)
+wandb.init(project=args.project, id=args.run_id, name=args.run_id.split('.')[0])
 wandb.config.update(args)
 
 if args.network == 'wideresnet15':
@@ -78,7 +78,7 @@ else:
     from dlshogi.policy_value_network import *
 
 logging.basicConfig(
-    format='%(asctime)s\t%(levelname)s\t%(message)s', datefmt='%Y/%m/%d %H:%M:%S', level=logging.DEBUG,
+    format='%(asctime)s\t%(levelname)s\t%(message)s', datefmt='%Y/%m/%d %H:%M:%S', level=logging.INFO,
     handlers=[logging.FileHandler(args.log), logging.StreamHandler()],
 )
 logging.info('batchsize={}'.format(args.batchsize))
