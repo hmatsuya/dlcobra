@@ -49,6 +49,12 @@ void sigint_handler(int signum)
 
 // ランダムムーブの手数
 int RANDOM_MOVE;
+// 訪問数が最大のノードの価値の一定割合以下は除外
+float RANDOM_CUTOFF = 0.0f;
+// 訪問数に応じてランダムに選択する際の温度パラメータ
+float RANDOM_TEMPERATURE = 1.0f;
+// 訪問回数が最大の手が2番目の手のx倍以内の場合にランダムに選択する
+float RANDOM2 = 0;
 // 出力する最低手数
 int MIN_MOVE;
 // ルートの方策に加えるノイズの確率(千分率)
@@ -108,7 +114,8 @@ std::atomic<s64> usi_draws(0);
 
 ifstream ifs;
 ofstream ofs;
-//ofstream ofs_dup;
+bool OUT_MIN_HCP = false;
+ofstream ofs_minhcp;
 mutex imutex;
 mutex omutex;
 size_t entryNum;
@@ -447,6 +454,7 @@ UCTSearcherGroup::Initialize()
 	if (ROOT_MATE_SEARCH_DEPTH > 0) {
 		dfpn.init();
 		dfpn.set_max_search_node(MATE_SEARCH_MAX_NODE);
+		dfpn.set_maxdepth(ROOT_MATE_SEARCH_DEPTH);
 		mate_search_slot = new MateSearchEntry[policy_value_batch_maxsize];
 	}
 }
@@ -1125,19 +1133,31 @@ void UCTSearcher::NextStep()
 			}
 		}
 
-		child_node_t* uct_child = root_node->child.get();
+		const child_node_t* uct_child = root_node->child.get();
 		unsigned int select_index = 0;
 		Move best_move;
 		if (ply <= RANDOM_MOVE) {
 			// N手までは訪問数に応じた確率で選択する
-			vector<int> probabilities(root_node->child_num);
+			// 訪問数が最大のノードの価値の一定割合以下は除外
+			const auto max_move_count_child = std::max_element(uct_child, uct_child + root_node->child_num, [](const child_node_t& l, const child_node_t& r) { return l.move_count < r.move_count; });
+			const auto cutoff_threshold = max_move_count_child->win / max_move_count_child->move_count * RANDOM_CUTOFF;
+			vector<int> indexes;
+			vector<double> probabilities;
+			indexes.reserve(root_node->child_num);
+			probabilities.reserve(root_node->child_num);
 			for (int i = 0; i < root_node->child_num; i++) {
-				probabilities[i] = uct_child[i].move_count;
-				SPDLOG_TRACE(logger, "gpu_id:{} group_id:{} id:{} {}:{} move_count:{} nnrate:{} win_rate:{}", grp->gpu_id, grp->group_id, id, i, uct_child[i].move.toUSI(), uct_child[i].move_count, uct_child[i].nnrate, uct_child[i].win / (uct_child[i].move_count + 0.000001f));
+				if (uct_child[i].move_count > 0) {
+					const auto win = uct_child[i].win / uct_child[i].move_count;
+					if (win >= cutoff_threshold) {
+						indexes.emplace_back(i);
+						probabilities.emplace_back(std::pow(uct_child[i].move_count, 1.0 / RANDOM_TEMPERATURE));
+						SPDLOG_TRACE(logger, "gpu_id:{} group_id:{} id:{} {}:{} move_count:{} nnrate:{} win_rate:{}", grp->gpu_id, grp->group_id, id, i, uct_child[i].move.toUSI(), uct_child[i].move_count, uct_child[i].nnrate, uct_child[i].win / (uct_child[i].move_count));
+					}
+				}
 			}
 
 			discrete_distribution<unsigned int> dist(probabilities.begin(), probabilities.end());
-			select_index = dist(*mt_64);
+			select_index = indexes[dist(*mt_64)];
 			best_move = uct_child[select_index].move;
 			SPDLOG_DEBUG(logger, "gpu_id:{} group_id:{} id:{} ply:{} {} random_move:{}", grp->gpu_id, grp->group_id, id, ply, pos_root->toSFEN(), best_move.toUSI());
 			AddRecord(best_move, 0, false);
@@ -1145,6 +1165,8 @@ void UCTSearcher::NextStep()
 		else {
 			// 探索回数最大の手を見つける
 			int max_count = uct_child[0].move_count;
+			int second_index = 0;
+			int second_count = 0;
 			int child_win_count = 0;
 			int child_lose_count = 0;
 			const int child_num = root_node->child_num;
@@ -1171,10 +1193,23 @@ void UCTSearcher::NextStep()
 				}
 
 				if (child_lose_count == 0 && uct_child[i].move_count > max_count) {
+					second_index = select_index;
+					second_count = max_count;
 					select_index = i;
 					max_count = uct_child[i].move_count;
 				}
-				SPDLOG_TRACE(logger, "gpu_id:{} group_id:{} id:{} {}:{} move_count:{} nnrate:{} win_rate:{}", grp->gpu_id, grp->group_id, id, i, uct_child[i].move.toUSI(), uct_child[i].move_count, uct_child[i].nnrate, uct_child[i].win / (uct_child[i].move_count + 0.000001f));
+			}
+
+			if (RANDOM2 > 1) {
+				// 訪問回数が最大の手が2番目の手のx倍以内の場合にランダムに選択する
+				if (max_count < second_count * RANDOM2) {
+					vector<int> probabilities{ second_count, max_count };
+					discrete_distribution<unsigned int> dist(probabilities.begin(), probabilities.end());
+					const auto i = dist(*mt_64);
+					if (i == 0)
+						select_index = second_index;
+					SPDLOG_DEBUG(logger, "gpu_id:{} group_id:{} id:{} ply:{} {} random2:{},{} selected:{}", grp->gpu_id, grp->group_id, id, ply, pos_root->toSFEN(), second_count, max_count, i);
+				}
 			}
 
 			// 選択した着手の勝率の算出
@@ -1345,11 +1380,11 @@ void UCTSearcher::NextGame()
 		}
 	}
 
-	// すぐに終局した初期局面を削除候補とする
-	/*if (ply < 10) {
+	// すぐに終局した初期局面を出力する
+	if (OUT_MIN_HCP && ply < MIN_MOVE) {
 		std::unique_lock<Mutex> lock(omutex);
-		ofs_dup.write(reinterpret_cast<char*>(&hcp), sizeof(HuffmanCodedPos));
-	}*/
+		ofs_minhcp.write(reinterpret_cast<char*>(&hcp), sizeof(HuffmanCodedPos));
+	}
 
 	// 新しいゲーム
 	playout = 0;
@@ -1376,7 +1411,7 @@ void make_teacher(const char* recordFileName, const char* outputFileName, const 
 		exit(EXIT_FAILURE);
 	}
 	// 削除候補の初期局面を出力するファイル
-	//ofs_dup.open(string(outputFileName) + "_dup", ios::binary);
+	if (OUT_MIN_HCP) ofs_minhcp.open(string(outputFileName) + "_min.hcp", ios::binary);
 
 	vector<UCTSearcherGroupPair> group_pairs;
 	group_pairs.reserve(gpu_id.size());
@@ -1440,7 +1475,7 @@ void make_teacher(const char* recordFileName, const char* outputFileName, const 
 	progressThread.join();
 	ifs.close();
 	ofs.close();
-	//ofs_dup.close();
+	if (OUT_MIN_HCP) ofs_minhcp.close();
 
 	logger->info("Made {} teacher nodes in {} seconds. games:{}, draws:{}, ply/game:{}, usi_games:{}, usi_win:{}, usi_draw:{}, usi_winrate:{:.2f}%",
 		madeTeacherNodes, t.elapsed() / 1000,
@@ -1459,7 +1494,7 @@ int main(int argc, char* argv[]) {
 	vector<int> gpu_id(1);
 	vector<int> batchsize(1);
 
-	cxxopts::Options options("make_hcpe_by_self_play");
+	cxxopts::Options options("selfplay");
 	options.positional_help("modelfile hcp output nodes playout_num gpu_id batchsize [gpu_id batchsize]*");
 	try {
 		options.add_options()
@@ -1473,6 +1508,9 @@ int main(int argc, char* argv[]) {
 			("positional", "", cxxopts::value<std::vector<int>>())
 			("threads", "thread number", cxxopts::value<int>(threads)->default_value("2"), "num")
 			("random", "random move number", cxxopts::value<int>(RANDOM_MOVE)->default_value("4"), "num")
+			("random_cutoff", "random cutoff ratio", cxxopts::value<float>(RANDOM_CUTOFF)->default_value("0.9"))
+			("random_temperature", "random temperature", cxxopts::value<float>(RANDOM_TEMPERATURE)->default_value("1.0"))
+			("random2", "random2", cxxopts::value<float>(RANDOM2)->default_value("0"))
 			("min_move", "minimum move number", cxxopts::value<int>(MIN_MOVE)->default_value("10"), "num")
 			("max_move", "maximum move number", cxxopts::value<int>(MAX_MOVE)->default_value("320"), "num")
 			("out_max_move", "output the max move game", cxxopts::value<bool>(OUT_MAX_MOVE)->default_value("false"))
@@ -1487,6 +1525,7 @@ int main(int argc, char* argv[]) {
 			("c_base_root", "UCT parameter c_base_root", cxxopts::value<float>(c_base_root)->default_value("39470.0"), "val")
 			("temperature", "Softmax temperature", cxxopts::value<float>(temperature)->default_value("1.66"), "val")
 			("reuse", "reuse sub tree", cxxopts::value<bool>(REUSE_SUBTREE)->default_value("false"))
+			("out_min_hcp", "output minimum move hcp", cxxopts::value<bool>(OUT_MIN_HCP)->default_value("false"))
 			("nn_cache_size", "nn cache size", cxxopts::value<unsigned int>(nn_cache_size)->default_value("8388608"))
 			("usi_engine", "USIEngine exe path", cxxopts::value<std::string>(usi_engine_path))
 			("usi_engine_num", "USIEngine number", cxxopts::value<int>(usi_engine_num)->default_value("0"), "num")
@@ -1571,8 +1610,6 @@ int main(int argc, char* argv[]) {
 		return 0;
 	}
 
-	DfPn::set_maxdepth(ROOT_MATE_SEARCH_DEPTH);
-
 	logger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] %v");
 	logger->set_level(spdlog::level::trace);
 	logger->info("modelfile:{} roots.hcp:{} output:{} nodes:{} playout_num:{}", model_path, recordFileName, outputFileName, teacherNodes, playout_num);
@@ -1592,6 +1629,9 @@ int main(int argc, char* argv[]) {
 
 	logger->info("threads:{}", threads);
 	logger->info("random:{}", RANDOM_MOVE);
+	logger->info("random_cutoff:{}", RANDOM_CUTOFF);
+	logger->info("random_temperature:{}", RANDOM_TEMPERATURE);
+	logger->info("random2:{}", RANDOM2);
 	logger->info("min_move:{}", MIN_MOVE);
 	logger->info("max_move:{}", MAX_MOVE);
 	logger->info("out_max_move:{}", OUT_MAX_MOVE);
@@ -1607,6 +1647,7 @@ int main(int argc, char* argv[]) {
 	logger->info("temperature:{}", temperature);
 	logger->info("reuse:{}", REUSE_SUBTREE);
 	logger->info("nn_cache_size:{}", nn_cache_size);
+	if (OUT_MIN_HCP) logger->info("out_min_hcp");
 	logger->info("usi_engine:{}", usi_engine_path);
 	logger->info("usi_engine_num:{}", usi_engine_num);
 	logger->info("usi_threads:{}", usi_threads);
