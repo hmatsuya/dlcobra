@@ -1,4 +1,4 @@
-import numpy as np
+﻿import numpy as np
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
@@ -18,6 +18,12 @@ import os
 import re
 
 import logging
+
+import wandb
+import cshogi
+import cairosvg
+import io
+from PIL import Image
 
 def main(*argv):
     parser = argparse.ArgumentParser(description='Train policy value network')
@@ -40,6 +46,8 @@ def main(*argv):
     parser.add_argument('--reset_scheduler', action='store_true')
     parser.add_argument('--clip_grad_max_norm', type=float, default=10.0, help='max norm of the gradients')
     parser.add_argument('--use_critic', action='store_true')
+    parser.add_argument('--use_result_critic', action='store_true')
+    parser.add_argument('--use_value_critic', action='store_true')
     parser.add_argument('--beta', type=float, help='entropy regularization coeff')
     parser.add_argument('--val_lambda', type=float, default=0.333, help='regularization factor')
     parser.add_argument('--gpu', '-g', type=int, default=0, help='GPU ID')
@@ -52,9 +60,14 @@ def main(*argv):
     parser.add_argument('--use_average', action='store_true')
     parser.add_argument('--use_evalfix', action='store_true')
     parser.add_argument('--temperature', type=float, default=1.0)
+    parser.add_argument('--project', default='test', help='wandb project name')
+    parser.add_argument('--run_id', type=str, default=None, help='wandb run id and name')
     args = parser.parse_args(argv)
 
-    logging.basicConfig(format='%(asctime)s\t%(levelname)s\t%(message)s', datefmt='%Y/%m/%d %H:%M:%S', filename=args.log, level=logging.DEBUG)
+    logging.basicConfig(
+        format='%(asctime)s\t%(levelname)s\t%(message)s', datefmt='%Y/%m/%d %H:%M:%S', level=logging.INFO,
+        handlers=[logging.FileHandler(args.log), logging.StreamHandler()],
+    )
     logging.info('network {}'.format(args.network))
     logging.info('batchsize={}'.format(args.batchsize))
     logging.info('lr={}'.format(args.lr))
@@ -75,6 +88,11 @@ def main(*argv):
     model = policy_value_network(args.network)
     model.to(device)
 
+    wandb.init(project=args.project, id=args.run_id, name=args.run_id.split('.')[0])
+    wandb.config.update(args)
+
+    wandb.watch(model, log_freq=args.eval_interval)
+
     if args.optimizer[-1] != ')':
         args.optimizer += '()'
     optimizer = eval('optim.' + args.optimizer.replace('(', '(model.parameters(),lr=args.lr,' + 'weight_decay=args.weight_decay,' if args.weight_decay >= 0 else ''))
@@ -92,6 +110,7 @@ def main(*argv):
         return torch.sum(-soft_targets * F.log_softmax(pred, dim=1), 1)
     cross_entropy_loss = torch.nn.CrossEntropyLoss(reduction='none')
     bce_with_logits_loss = torch.nn.BCEWithLogitsLoss()
+    bce_with_logits_loss_noreduce = torch.nn.BCEWithLogitsLoss(reduction='none')
     if args.use_amp:
         logging.info('use amp')
     scaler = torch.cuda.amp.GradScaler(enabled=args.use_amp)
@@ -225,6 +244,37 @@ def main(*argv):
 
         torch.save(checkpoint, path)
 
+    def log_example(t, hcpevec, loss_policy, loss_result, loss_value, loss_sum, t1, t2, value, y1, y2):
+        y2 = torch.sigmoid(y2)
+        test_data_at = wandb.Artifact("test_samples_" + wandb.run.id, type="predictions")
+        test_table = wandb.Table(columns=["t", "label", "position", "turn", "t1", "y1", "t2", "value", "y2", "loss_policy", "loss_result", "loss_value", "loss_sum", "sfen"])
+        _log_example(loss_policy, 'good loss_policy', test_table, t, hcpevec, loss_policy, loss_result, loss_value, loss_sum, t1, t2, value, y1, y2)
+        _log_example(-loss_policy, 'bad loss_policy', test_table, t, hcpevec, loss_policy, loss_result, loss_value, loss_sum, t1, t2, value, y1, y2)
+        _log_example(loss_result, 'good loss_result', test_table, t, hcpevec, loss_policy, loss_result, loss_value, loss_sum, t1, t2, value, y1, y2)
+        _log_example(-loss_result, 'bad loss_result', test_table, t, hcpevec, loss_policy, loss_result, loss_value, loss_sum, t1, t2, value, y1, y2)
+        _log_example(loss_value, 'good loss_value', test_table, t, hcpevec, loss_policy, loss_result, loss_value, loss_sum, t1, t2, value, y1, y2)
+        _log_example(-loss_value, 'bad loss_value', test_table, t, hcpevec, loss_policy, loss_result, loss_value, loss_sum, t1, t2, value, y1, y2)
+        _log_example(loss_sum, 'good loss_sum', test_table, t, hcpevec, loss_policy, loss_result, loss_value, loss_sum, t1, t2, value, y1, y2)
+        _log_example(-loss_sum, 'bad loss_sum', test_table, t, hcpevec, loss_policy, loss_result, loss_value, loss_sum, t1, t2, value, y1, y2)
+        test_data_at.add(test_table, "predictions")
+        wandb.run.log_artifact(test_data_at)
+
+    def _log_example(sortvec, label, table, t, hcpevec, loss_policy, loss_result, loss_value, loss_sum, t1, t2, value, y1, y2):
+        sort_idx = np.argsort(sortvec.to('cpu').detach().numpy().copy())
+        board = cshogi.Board()
+        for i in range(5):
+            j = sort_idx[i]
+            png_file = io.BytesIO()
+            board.set_hcp(hcpevec[j]['hcp'])
+            svg = board.to_svg().replace('serif', 'Noto Serif CJK JP')
+            cairosvg.svg2png(bytestring=svg.encode('utf-8'), write_to=png_file)
+            image = wandb.Image(Image.open(png_file))
+            y1_max = torch.argmax(y1[j]).item()
+            if board.turn == 1:
+                y1_max = 80 - y1_max
+            table.add_data(t, label, image, board.turn, cshogi.move_to_usi(hcpevec[j]['bestMove16']), cshogi.SQUARE_NAMES[y1_max % 81], t2[j].item(), value[j].item(), y2[j].item(), loss_policy[j], loss_result[j], loss_value[j], loss_sum[j].item(), board.sfen())
+            png_file.close()
+
     # train
     steps = 0
     sum_loss1 = 0
@@ -254,6 +304,12 @@ def main(*argv):
                 if args.use_critic:
                     z = t2.view(-1) - value.view(-1) + 0.5
                     loss1 = (loss1 * z).mean()
+                elif args.use_result_critic:
+                    z = t2.view(-1) * 1.5 + 0.5
+                    loss1 = (loss1 * z).mean()
+                elif args.use_value_critic:
+                    z = F.softplus(value.view(-1) - torch.sigmoid(y2.view(-1)), beta=1.5)
+                    loss1 = (loss1 * z).mean()
                 else:
                     loss1 = loss1.mean()
                 if args.beta:
@@ -278,23 +334,37 @@ def main(*argv):
             sum_loss += loss.item()
 
             # print train loss
-            if t % eval_interval == 0:
+            if (t % eval_interval == 0) or (t == 1):
                 model.eval()
 
-                x1, x2, t1, t2, value = test_dataloader.sample()
+                x1, x2, t1, t2, value, hcpevec = test_dataloader.sample_test()
                 with torch.no_grad():
                     y1, y2 = model(x1, x2)
 
-                    loss1 = cross_entropy_loss(y1, t1).mean()
-                    loss2 = bce_with_logits_loss(y2, t2)
-                    loss3 = bce_with_logits_loss(y2, value)
-                    loss = loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3
+                    loss1 = (loss1_noreduce := cross_entropy_loss(y1, t1)).mean()
+                    loss2 = (loss2_noreduce := torch.flatten(bce_with_logits_loss_noreduce(y2, t2))).mean()
+                    loss3 = (loss3_noreduce := torch.flatten(bce_with_logits_loss_noreduce(y2, value))).mean()
+                    loss = (loss_noreduce := loss1_noreduce + (1 - args.val_lambda) * loss2_noreduce + args.val_lambda * loss3_noreduce).mean()
+                    logging.debug(f"loss1: {loss1.detach().cpu().shape}")
+                    logging.debug(f"loss2: {loss2.detach().cpu().shape}")
+                    logging.debug(f"loss3: {loss3.detach().cpu().shape}")
+                    logging.debug(f"loss:  {loss.detach().cpu().shape}")
+                    logging.debug(f"loss1_noreduce: {loss1_noreduce.detach().cpu().shape}")
+                    logging.debug(f"loss2_noreduce: {loss2_noreduce.detach().cpu().shape}")
+                    logging.debug(f"loss3_noreduce: {loss3_noreduce.detach().cpu().shape}")
+                    logging.debug(f"loss_noreduce:  {loss_noreduce.detach().cpu().shape}")
 
                     logging.info('epoch = {}, steps = {}, train loss = {:.07f}, {:.07f}, {:.07f}, {:.07f}, test loss = {:.07f}, {:.07f}, {:.07f}, {:.07f}, test accuracy = {:.07f}, {:.07f}'.format(
                         epoch, t,
                         sum_loss1 / steps, sum_loss2 / steps, sum_loss3 / steps, sum_loss / steps,
                         loss1.item(), loss2.item(), loss3.item(), loss.item(),
                         accuracy(y1, t1), binary_accuracy(y2, t2)))
+
+                    wandb.log({
+                        "train/loss_policy": sum_loss1 / steps, "train/loss_result": sum_loss2 / steps, "train/loss_value": sum_loss3 / steps, "train/loss_sum": sum_loss / steps,
+                        "valid/loss_policy": loss1.item(), "valid/loss_result": loss2.item(), "valid/loss_value": loss3.item(), "valid/loss_sum": loss.item(), "valid_acc/acc_policy": accuracy(y1, t1), "valid_acc/acc_result": binary_accuracy(y2,t2),
+                    }, step=t)
+                    log_example(t, hcpevec, loss1_noreduce, loss2_noreduce, loss3_noreduce, loss_noreduce, t1, t2, value, y1, y2)
 
                 steps_epoch += steps
                 sum_loss1_epoch += sum_loss1
