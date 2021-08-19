@@ -1,5 +1,6 @@
 ﻿from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
+from Cython.Build import cythonize
 
 class my_build_ext(build_ext):
     def build_extensions(self):
@@ -29,11 +30,11 @@ ext_modules = [
 
 setup(
     name = 'dlshogi',
-    version = '0.0.6',
+    version = '0.0.6.1',
     author = 'Tadao Yamaoka',
     url='https://github.com/TadaoYamaoka/DeepLearningShogi',
     packages = ['dlshogi', 'dlshogi.network', 'dlshogi.utils'],
-    ext_modules=ext_modules,
+    ext_modules=cythonize(ext_modules),
     cmdclass={'build_ext': my_build_ext},
     description = 'DeepLearningShogi(dlshogi)',
     classifiers=[
