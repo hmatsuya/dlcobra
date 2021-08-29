@@ -47,6 +47,7 @@ def main(*argv):
     parser.add_argument('--clip_grad_max_norm', type=float, default=10.0, help='max norm of the gradients')
     parser.add_argument('--use_critic', action='store_true')
     parser.add_argument('--use_result_critic', action='store_true')
+    parser.add_argument('--critic_lambda', type=float, default=0.5, help='lost game factor for critic')
     parser.add_argument('--use_value_critic', action='store_true')
     parser.add_argument('--beta', type=float, help='entropy regularization coeff')
     parser.add_argument('--val_lambda', type=float, default=0.333, help='regularization factor')
@@ -305,7 +306,7 @@ def main(*argv):
                     z = t2.view(-1) - value.view(-1) + 0.5
                     loss1 = (loss1 * z).mean()
                 elif args.use_result_critic:
-                    z = t2.view(-1) * 1.5 + 0.5
+                    z = t2.view(-1) * (2 - args.critic_lambda) + args.critic_lambda
                     loss1 = (loss1 * z).mean()
                 elif args.use_value_critic:
                     z = F.softplus(value.view(-1) - torch.sigmoid(y2.view(-1)), beta=1.5)
