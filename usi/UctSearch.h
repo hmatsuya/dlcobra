@@ -42,8 +42,12 @@ extern unsigned int current_root;
 // ノード数の上限
 extern unsigned int po_max;
 
+// UCT探索の停止フラグ初期化
+void InitUctSearchStop();
+
 // 予測読みを止める
 void StopUctSearch(void);
+bool IsUctSearchStoped();
 
 // 予測読みのモードの設定
 void SetPonderingMode(bool flag);
@@ -82,6 +86,12 @@ void SetPvInterval(const int interval);
 
 // MultiPV設定
 void SetMultiPV(const int multipv);
+
+// 勝率から評価値に変換する際の係数設定
+void SetEvalCoef(const int eval_coef);
+
+// ランダムムーブ設定（1000分率）
+void SetRandomMove(const int ply, const int temperature, const int temperature_drop, const int cutoff, const int cutoff_drop);
 
 // モデルパスの設定
 void SetModelPath(const std::string path[max_gpu]);

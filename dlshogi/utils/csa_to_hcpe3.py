@@ -53,7 +53,7 @@ for filepath in csa_file_list:
         endgame = kif.endgame
         if endgame not in ('%TORYO', '%SENNICHITE', '%KACHI', '%JISHOGI') or len(kif.moves) < filter_moves:
             continue
-        if filter_rating > 0 and (kif.ratings[0] < filter_rating and kif.ratings[1] < filter_rating):
+        if filter_rating > 0 and min(kif.ratings) < filter_rating:
             continue
         # 評価値がない棋譜を除外
         if all(comment == '' for comment in kif.comments[0::2]) or all(comment == '' for comment in kif.comments[1::2]):
@@ -77,12 +77,12 @@ for filepath in csa_file_list:
                 move_info = move_info_vec[i]
                 move_visits = move_visits_vec[i]
 
-                assert abs(score) <= 100000
+                assert abs(score) <= 1000000
                 eval = min(32767, max(score, -32767))
                 move_info['eval'] = eval if board.turn == BLACK else -eval
                 move_info['selectedMove16'] = move16(move)
                 move_visits['move16'] = move16(move)
-                if not args.out_mate and endgame != '%KACHI' and abs(score) == 100000:
+                if not args.out_mate and endgame != '%KACHI' and abs(score) >= 100000:
                     break
                 board.push(move)
         except:
