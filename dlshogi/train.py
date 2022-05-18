@@ -61,7 +61,7 @@ def main(*argv):
     parser.add_argument('--use_average', action='store_true')
     parser.add_argument('--use_evalfix', action='store_true')
     parser.add_argument('--temperature', type=float, default=1.0)
-    parser.add_argument('--project', default='test', help='wandb project name')
+    parser.add_argument('--project', default=None, help='wandb project name')
     parser.add_argument('--run_id', type=str, default=None, help='wandb run id and name')
     args = parser.parse_args(argv)
 
@@ -90,10 +90,11 @@ def main(*argv):
     model = policy_value_network(args.network)
     model.to(device)
 
-    wandb.init(project=args.project, id=args.run_id, name=args.run_id.split('.')[0])
-    wandb.config.update(args)
+    if args.project is not None:
+        wandb.init(project=args.project, id=args.run_id, name=args.run_id.split('.')[0])
+        wandb.config.update(args)
 
-    wandb.watch(model, log_freq=args.eval_interval)
+        wandb.watch(model, log_freq=args.eval_interval)
 
     if args.optimizer[-1] != ')':
         args.optimizer += '()'
@@ -347,14 +348,6 @@ def main(*argv):
                     loss2 = (loss2_noreduce := torch.flatten(bce_with_logits_loss_noreduce(y2, t2))).mean()
                     loss3 = (loss3_noreduce := torch.flatten(bce_with_logits_loss_noreduce(y2, value))).mean()
                     loss = (loss_noreduce := loss1_noreduce + (1 - args.val_lambda) * loss2_noreduce + args.val_lambda * loss3_noreduce).mean()
-                    logging.debug(f"loss1: {loss1.detach().cpu().shape}")
-                    logging.debug(f"loss2: {loss2.detach().cpu().shape}")
-                    logging.debug(f"loss3: {loss3.detach().cpu().shape}")
-                    logging.debug(f"loss:  {loss.detach().cpu().shape}")
-                    logging.debug(f"loss1_noreduce: {loss1_noreduce.detach().cpu().shape}")
-                    logging.debug(f"loss2_noreduce: {loss2_noreduce.detach().cpu().shape}")
-                    logging.debug(f"loss3_noreduce: {loss3_noreduce.detach().cpu().shape}")
-                    logging.debug(f"loss_noreduce:  {loss_noreduce.detach().cpu().shape}")
 
                     logging.info('epoch = {}, steps = {}, train loss = {:.07f}, {:.07f}, {:.07f}, {:.07f}, test loss = {:.07f}, {:.07f}, {:.07f}, {:.07f}, test accuracy = {:.07f}, {:.07f}'.format(
                         epoch, t,
@@ -362,11 +355,12 @@ def main(*argv):
                         loss1.item(), loss2.item(), loss3.item(), loss.item(),
                         accuracy(y1, t1), binary_accuracy(y2, t2)))
 
-                    wandb.log({
-                        "train/loss_policy": sum_loss1 / steps, "train/loss_result": sum_loss2 / steps, "train/loss_value": sum_loss3 / steps, "train/loss_sum": sum_loss / steps,
-                        "valid/loss_policy": loss1.item(), "valid/loss_result": loss2.item(), "valid/loss_value": loss3.item(), "valid/loss_sum": loss.item(), "valid_acc/acc_policy": accuracy(y1, t1), "valid_acc/acc_result": binary_accuracy(y2,t2),
-                    }, step=t)
-                    log_example(t, hcpevec, loss1_noreduce, loss2_noreduce, loss3_noreduce, loss_noreduce, t1, t2, value, y1, y2)
+                    if args.project is not None:
+                        wandb.log({
+                            "train/loss_policy": sum_loss1 / steps, "train/loss_result": sum_loss2 / steps, "train/loss_value": sum_loss3 / steps, "train/loss_sum": sum_loss / steps,
+                            "valid/loss_policy": loss1.item(), "valid/loss_result": loss2.item(), "valid/loss_value": loss3.item(), "valid/loss_sum": loss.item(), "valid_acc/acc_policy": accuracy(y1, t1), "valid_acc/acc_result": binary_accuracy(y2,t2),
+                        }, step=t)
+                        log_example(t, hcpevec, loss1_noreduce, loss2_noreduce, loss3_noreduce, loss_noreduce, t1, t2, value, y1, y2)
 
                 steps_epoch += steps
                 sum_loss1_epoch += sum_loss1
