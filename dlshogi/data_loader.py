@@ -65,8 +65,6 @@ class DataLoader:
 
     def sample_test(self):
         hcpevec = np.random.choice(self.data, self.batch_size, replace=False)
-        logging.debug(f"hcpevec.shape: {hcpevec.shape}")
-        logging.debug(f"hcpevec type: {type(hcpevec[0])}")
         return self.mini_batch(hcpevec) + (hcpevec,)
 
     def pre_fetch(self):
