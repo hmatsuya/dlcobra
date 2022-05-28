@@ -62,14 +62,15 @@ def main(*argv):
     parser.add_argument('--use_evalfix', action='store_true')
     parser.add_argument('--temperature', type=float, default=1.0)
     parser.add_argument('--project', default=None, help='wandb project name')
+    parser.add_argument('--entity', default=None, help='wandb entity name')
     parser.add_argument('--run_id', type=str, default=None, help='wandb run id and name')
     args = parser.parse_args(argv)
 
 
     if args.log:
-        logging.basicConfig(format='%(asctime)s\t%(levelname)s\t%(message)s', datefmt='%Y/%m/%d %H:%M:%S', filename=args.log, level=logging.DEBUG)
+        logging.basicConfig(format='%(asctime)s\t%(levelname)s\t%(message)s', datefmt='%Y/%m/%d %H:%M:%S', filename=args.log, level=logging.INFO)
     else:
-        logging.basicConfig(format='%(asctime)s\t%(levelname)s\t%(message)s', datefmt='%Y/%m/%d %H:%M:%S', stream=sys.stdout, level=logging.DEBUG)
+        logging.basicConfig(format='%(asctime)s\t%(levelname)s\t%(message)s', datefmt='%Y/%m/%d %H:%M:%S', stream=sys.stdout, level=logging.INFO)
     logging.info('network {}'.format(args.network))
     logging.info('batchsize={}'.format(args.batchsize))
     logging.info('lr={}'.format(args.lr))
@@ -92,7 +93,7 @@ def main(*argv):
 
     if args.project is not None:
         wandb.init(project=args.project, id=args.run_id, name=args.run_id.split('.')[0])
-        wandb.config.update(args)
+        wandb.config.update(args, allow_val_change=True)
 
         wandb.watch(model, log_freq=args.eval_interval)
 
