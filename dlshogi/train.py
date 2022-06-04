@@ -16,6 +16,7 @@ import random
 import sys
 import os
 import re
+import multiprocessing
 
 import logging
 
@@ -83,10 +84,12 @@ def main(*argv):
         logging.info('entropy regularization coeff={}'.format(args.beta))
     logging.info('val_lambda={}'.format(args.val_lambda))
 
+    logging.info('gpu={}'.format(args.gpu))
     if args.gpu >= 0:
         device = torch.device(f"cuda:{args.gpu}")
     else:
         device = torch.device("cpu")
+        torch.set_num_threads(multiprocessing.cpu_count())
 
     model = policy_value_network(args.network)
     model.to(device)
