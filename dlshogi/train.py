@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
@@ -209,7 +209,7 @@ def main(*argv):
                 loss1 = cross_entropy_loss(y1, t1).mean()
                 loss2 = bce_with_logits_loss(y2, t2)
                 loss3 = bce_with_logits_loss(y2, value)
-                loss = loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3
+                loss = loss1 * ((1 - args.val_lambda) * loss2 + args.val_lambda * loss3)
                 sum_test_loss1 += loss1.item()
                 sum_test_loss2 += loss2.item()
                 sum_test_loss3 += loss3.item()
@@ -323,7 +323,7 @@ def main(*argv):
                     loss1 += args.beta * (F.softmax(y1, dim=1) * F.log_softmax(y1, dim=1)).sum(dim=1).mean()
                 loss2 = bce_with_logits_loss(y2, t2)
                 loss3 = bce_with_logits_loss(y2, value)
-                loss = loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3
+                loss = loss1 * ((1 - args.val_lambda) * loss2 + args.val_lambda * loss3)
 
             scaler.scale(loss).backward()
             if args.clip_grad_max_norm:
@@ -351,7 +351,7 @@ def main(*argv):
                     loss1 = (loss1_noreduce := cross_entropy_loss(y1, t1)).mean()
                     loss2 = (loss2_noreduce := torch.flatten(bce_with_logits_loss_noreduce(y2, t2))).mean()
                     loss3 = (loss3_noreduce := torch.flatten(bce_with_logits_loss_noreduce(y2, value))).mean()
-                    loss = (loss_noreduce := loss1_noreduce + (1 - args.val_lambda) * loss2_noreduce + args.val_lambda * loss3_noreduce).mean()
+                    loss = (loss_noreduce := loss1_noreduce * ((1 - args.val_lambda) * loss2_noreduce + args.val_lambda * loss3_noreduce)).mean()
 
                     logging.info('epoch = {}, steps = {}, train loss = {:.07f}, {:.07f}, {:.07f}, {:.07f}, test loss = {:.07f}, {:.07f}, {:.07f}, {:.07f}, test accuracy = {:.07f}, {:.07f}'.format(
                         epoch, t,
