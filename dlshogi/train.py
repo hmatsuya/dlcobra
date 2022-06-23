@@ -1,4 +1,4 @@
-import numpy as np
+﻿import numpy as np
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
@@ -25,8 +25,10 @@ import cshogi
 import cairosvg
 import io
 from PIL import Image
+import optuna
+import numpy as np
 
-def main(*argv):
+def main(*argv, optuna_trial=None):
     parser = argparse.ArgumentParser(description='Train policy value network')
     parser.add_argument('train_data', type=str, nargs='+', help='training data file')
     parser.add_argument('test_data', type=str, help='test data file')
@@ -65,6 +67,7 @@ def main(*argv):
     parser.add_argument('--project', default=None, help='wandb project name')
     parser.add_argument('--entity', default=None, help='wandb entity name')
     parser.add_argument('--run_id', type=str, default=None, help='wandb run id and name')
+    parser.add_argument('--patience', type=int, default=-1, help='patience for early stopping')
     args = parser.parse_args(argv)
 
 
@@ -160,6 +163,10 @@ def main(*argv):
     else:
         epoch = 0
         t = 0
+    
+    min_loss = 9999
+    no_progress = 0
+    early_stop = False
 
     logging.info('optimizer {}'.format(re.sub(' +', ' ', str(optimizer).replace('\n', ''))))
 
@@ -281,7 +288,7 @@ def main(*argv):
                 y1_max = 80 - y1_max
             table.add_data(t, label, image, board.turn, cshogi.move_to_usi(hcpevec[j]['bestMove16']), cshogi.SQUARE_NAMES[y1_max % 81], t2[j].item(), value[j].item(), y2[j].item(), loss_policy[j], loss_result[j], loss_value[j], loss_sum[j].item(), board.sfen())
             png_file.close()
-
+    
     # train
     steps = 0
     sum_loss1 = 0
@@ -359,12 +366,27 @@ def main(*argv):
                         loss1.item(), loss2.item(), loss3.item(), loss.item(),
                         accuracy(y1, t1), binary_accuracy(y2, t2)))
 
+                    optuna_step = int(t / eval_interval)
                     if args.project is not None:
                         wandb.log({
                             "train/loss_policy": sum_loss1 / steps, "train/loss_result": sum_loss2 / steps, "train/loss_value": sum_loss3 / steps, "train/loss_sum": sum_loss / steps,
                             "valid/loss_policy": loss1.item(), "valid/loss_result": loss2.item(), "valid/loss_value": loss3.item(), "valid/loss_sum": loss.item(), "valid_acc/acc_policy": accuracy(y1, t1), "valid_acc/acc_result": binary_accuracy(y2,t2),
-                        }, step=t)
+                        }, step=optuna_step)
                         log_example(t, hcpevec, loss1_noreduce, loss2_noreduce, loss3_noreduce, loss_noreduce, t1, t2, value, y1, y2)
+
+                    if optuna_trial is not None:
+                        optuna_trial.report(loss.item(), optuna_step)
+                        if optuna_trial.should_prune():
+                            raise optuna.TrialPruned()
+                    
+                    if loss.item() >= min_loss:
+                        no_progress += 1
+                        if args.patience >= 0 and no_progress > args.patience:
+                            early_stop = True
+                            logging.info(f"early stop; patience={args.patience}")
+                    else:
+                        no_progress = 0
+                        min_loss = loss.item()
 
                 steps_epoch += steps
                 sum_loss1_epoch += sum_loss1
@@ -377,6 +399,9 @@ def main(*argv):
                 sum_loss2 = 0
                 sum_loss3 = 0
                 sum_loss = 0
+            
+            if early_stop:
+                break
 
         steps_epoch += steps
         sum_loss1_epoch += sum_loss1
@@ -401,6 +426,9 @@ def main(*argv):
         if args.checkpoint:
             save_checkpoint()
 
+        if early_stop:
+            break
+
     # save model
     if args.model:
         if args.use_swa and epoch >= args.swa_start_epoch:
@@ -423,6 +451,8 @@ def main(*argv):
         model_path = args.model.format(**{'epoch':epoch, 'step':t})
         logging.info('Saving the model to {}'.format(model_path))
         serializers.save_npz(model_path, swa_model.module if args.use_swa else model)
+    
+    return loss.item()
 
 if __name__ == '__main__':
     main(*sys.argv[1:])
