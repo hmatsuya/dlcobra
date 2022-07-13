@@ -68,6 +68,7 @@ def main(*argv, optuna_trial=None):
     parser.add_argument('--entity', default=None, help='wandb entity name')
     parser.add_argument('--run_id', type=str, default=None, help='wandb run id and name')
     parser.add_argument('--patience', type=int, default=-1, help='patience for early stopping')
+    parser.add_argument('--hflip', type=float, default=0.0, help='probability of horizontal flip')
     args = parser.parse_args(argv)
 
 
@@ -181,7 +182,7 @@ def main(*argv, optuna_trial=None):
     logging.info('train position num = {}'.format(len(train_data)))
     logging.info('test position num = {}'.format(len(test_data)))
 
-    train_dataloader = Hcpe3DataLoader(train_data, args.batchsize, device, shuffle=True)
+    train_dataloader = Hcpe3DataLoader(train_data, args.batchsize, device, shuffle=True, hflip=args.hflip)
     test_dataloader = DataLoader(test_data, args.testbatchsize, device)
 
     # for SWA update_bn
