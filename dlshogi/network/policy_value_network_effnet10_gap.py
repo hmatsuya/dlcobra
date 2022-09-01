@@ -16,13 +16,6 @@ class PolicyValueNetworkV1(nn.Module):
     def __init__(
         self,
         inverted_residual_setting: Sequence[MBConvConfig]  = [
-            # MBConvConfig(1, 3, 1, k, k, 1, 1, 1),
-            # MBConvConfig(4, 3, 2, k, k, 2, 1, 1),
-            # MBConvConfig(4, 3, 2, k, k, 2, 1, 1),
-            # MBConvConfig(4, 3, 2, k, k, 3, 1, 1),
-            # MBConvConfig(6, 3, 1, k, k, 3, 1, 1),
-            # MBConvConfig(6, 3, 2, k, k, 1, 1, 1),
-
             MBConvConfig(1, 3, 1, k, k, 1, 1, 1),
             MBConvConfig(4, 3, 1, k, k, 2, 1, 1),
             MBConvConfig(4, 3, 1, k, k, 2, 1, 1),
@@ -109,7 +102,6 @@ class PolicyValueNetworkV1(nn.Module):
         lastconv_output_channels = 2 * lastconv_input_channels # 4 * lastconv_input_channels
 
         self.features = nn.Sequential(*layers)
-        self.avgpool = nn.AdaptiveAvgPool2d(1)
 
         self.classifier = nn.Sequential(
             nn.Conv2d(
@@ -122,12 +114,6 @@ class PolicyValueNetworkV1(nn.Module):
         )
 
         self.regressor = nn.Sequential(
-            # nn.Conv2d(
-            #     lastconv_input_channels,
-            #     lastconv_output_channels,
-            #     kernel_size=1,
-            #     bias=False,
-            # ),
             ConvNormActivation(
                 lastconv_input_channels,
                 lastconv_output_channels,
@@ -170,21 +156,8 @@ class PolicyValueNetworkV1(nn.Module):
 
         return (policy, value)
 
-    # def _forward_impl(self, x: Tensor) -> Tensor:
-    #     x = self.features(x)
-
-    #     x = self.avgpool(x)
-    #     x = torch.flatten(x, 1)
-
-    #     x = self.classifier(x)
-
-    #     return x
-
-
     def forward(self, x1: Tensor, x2: Tensor) -> tuple([Tensor, Tensor]):
         return self._forward_impl(x1, x2)
-    # def forward(self, x: Tensor) -> Tensor:
-        # return self._forward_impl(x)
 
 class GlobalAvgPool2d(nn.Module):
     """
@@ -196,6 +169,7 @@ class GlobalAvgPool2d(nn.Module):
     def forward(self, x):
         x = x.mean(dim=-1, keepdim=True)
         return x.mean(dim=-2, keepdim=True)
+
 class PolicyValueNetwork(nn.Module):
     def __init__(
         self,
@@ -346,7 +320,6 @@ class PolicyValueNetwork(nn.Module):
         value = self.regressor(x)
 
         return (policy, value)
-
 
     def forward(self, x1: Tensor, x2: Tensor) -> tuple([Tensor, Tensor]):
         return self._forward_impl(x1, x2)
