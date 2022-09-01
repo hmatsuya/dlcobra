@@ -19,6 +19,8 @@ def main(*argv):
     parser.add_argument('--remove_aux', action='store_true')
     args = parser.parse_args(argv)
 
+    print("converting to onnx: ", args.network, args.model, flush=True)
+
     if args.gpu >= 0:
         torch.cuda.set_device(args.gpu)
         device = torch.device("cuda")
@@ -32,6 +34,7 @@ def main(*argv):
 
     serializers.load_npz(args.model, model, args.remove_aux)
     model.eval()
+    print("model loaded:", args.network, flush=True)
 
     def mini_batch(hcpevec):
         features1 = np.empty((len(hcpevec), FEATURES1_NUM, 9, 9), dtype=np.float32)
@@ -55,10 +58,13 @@ def main(*argv):
     batchsize = 1 if args.fixed_batchsize is None else args.fixed_batchsize
     hcpevec = np.array([([ 88, 164,  73,  33,  12, 215,  87,  33, 126, 142,  77,  33,  44, 175,  66, 120,  20, 194, 171,  16, 158,  77,  33,  44, 215,  95,  33,  62, 142,  73,  33,  12], 0, 7739, 1, 0)] * batchsize, HuffmanCodedPosAndEval)
     x1, x2, t1, t2, z, value = mini_batch(hcpevec)
+    print("got mini batch:", x1, x2, flush=True)
 
     if args.fixed_batchsize is None:
         torch.onnx.export(model, (x1, x2), args.onnx,
             verbose = True,
+            # export_params=True,
+            # opset_version=10,
             do_constant_folding = True,
             input_names = ['input1', 'input2'],
             output_names = ['output_policy', 'output_value'],
