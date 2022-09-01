@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, Optional, List, Sequence, Tuple, Union
 import torch
 from torch import nn, Tensor
 from torchvision.models.efficientnet import MBConv, MBConvConfig 
-from torchvision.ops.misc import ConvNormActivation, SqueezeExcitation
+from torchvision.ops.misc import ConvNormActivation, SqueezeExcitation, Conv2dNormActivation
 from torchvision.utils import _log_api_usage_once
 from dlshogi.common import *
 
@@ -16,13 +16,6 @@ class PolicyValueNetwork(nn.Module):
     def __init__(
         self,
         inverted_residual_setting: Sequence[MBConvConfig]  = [
-            # MBConvConfig(1, 3, 1, k, k, 1, 1, 1),
-            # MBConvConfig(4, 3, 2, k, k, 2, 1, 1),
-            # MBConvConfig(4, 3, 2, k, k, 2, 1, 1),
-            # MBConvConfig(4, 3, 2, k, k, 3, 1, 1),
-            # MBConvConfig(6, 3, 1, k, k, 3, 1, 1),
-            # MBConvConfig(6, 3, 2, k, k, 1, 1, 1),
-
             MBConvConfig(1, 3, 1, k, k, 1, 1, 1),
             MBConvConfig(4, 3, 1, k, k, 2, 1, 1),
             MBConvConfig(4, 3, 1, k, k, 2, 1, 1),
@@ -109,7 +102,6 @@ class PolicyValueNetwork(nn.Module):
         lastconv_output_channels = 4 * lastconv_input_channels
 
         self.features = nn.Sequential(*layers)
-        self.avgpool = nn.AdaptiveAvgPool2d(1)
 
         self.classifier = nn.Sequential(
             nn.Conv2d(
@@ -163,16 +155,6 @@ class PolicyValueNetwork(nn.Module):
 
         return (policy, value)
 
-    # def _forward_impl(self, x: Tensor) -> Tensor:
-    #     x = self.features(x)
-
-    #     x = self.avgpool(x)
-    #     x = torch.flatten(x, 1)
-
-    #     x = self.classifier(x)
-
-    #     return x
-
 
     def forward(self, x1: Tensor, x2: Tensor) -> tuple([Tensor, Tensor]):
         return self._forward_impl(x1, x2)
@@ -185,18 +167,18 @@ class PolicyValueNetworkV2(nn.Module):
     def __init__(
         self,
         inverted_residual_setting: Sequence[MBConvConfig]  = [
-            MBConvConfig(1, 3, 1, k, k, 2, 1, 1),
-            MBConvConfig(1, 3, 1, k, k, 2, 1, 1),
-            MBConvConfig(1, 3, 1, k, k*2, 2, 1, 1),
-            MBConvConfig(1, 3, 1, k*2, k*2, 3, 1, 1),
-            MBConvConfig(1, 3, 1, k*2, k*2, 3, 1, 1),
-            MBConvConfig(1, 3, 1, k*2, k*3, 1, 1, 1),
+            MBConvConfig(1, 3, 1, k, k, 1, 1, 1),
+            MBConvConfig(4, 3, 1, k, k, 2, 1, 1),
+            MBConvConfig(4, 3, 1, k, k, 2, 1, 1),
+            MBConvConfig(4, 3, 1, k, k, 3, 1, 1),
+            MBConvConfig(6, 3, 1, k, k, 3, 1, 1),
+            MBConvConfig(6, 3, 1, k, k*2, 1, 1, 1),
         ],
         dropout: float = 0.0,
         stochastic_depth_prob: float = 0.2,
         num_classes: int = MAX_MOVE_LABEL_NUM * 9 * 9,
         norm_layer: Optional[Callable[..., nn.Module]] = None,
-        last_channel: Optional[int] = k,
+        last_channel: Optional[int] = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -230,6 +212,9 @@ class PolicyValueNetworkV2(nn.Module):
                     if isinstance(s, MBConvConfig):
                         s.block = kwargs["block"]
 
+        self.swish = nn.SiLU()
+        self.norm1 = nn.BatchNorm2d(k)
+
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
 
@@ -242,8 +227,8 @@ class PolicyValueNetworkV2(nn.Module):
         # building first layer
         firstconv_output_channels = inverted_residual_setting[0].input_channels
         layers.append(
-            ConvNormActivation(
-                3, firstconv_output_channels, kernel_size=3, stride=2, norm_layer=norm_layer, activation_layer=nn.SiLU
+            Conv2dNormActivation(
+                k, firstconv_output_channels, kernel_size=3, stride=1, norm_layer=norm_layer, activation_layer=nn.SiLU
             )
         )
 
@@ -271,33 +256,32 @@ class PolicyValueNetworkV2(nn.Module):
 
         # building last several layers
         lastconv_input_channels = inverted_residual_setting[-1].out_channels
-        lastconv_output_channels = last_channel if last_channel is not None else 4 * lastconv_input_channels
-        self.policy_conv = ConvNormActivation(
-            lastconv_input_channels,
-            lastconv_output_channels,
-            kernel_size=1,
-            norm_layer=norm_layer,
-            activation_layer=nn.SiLU,
-        )
-        self.value_conv = ConvNormActivation(
-            lastconv_input_channels,
-            lastconv_output_channels,
-            kernel_size=1,
-            norm_layer=norm_layer,
-            activation_layer=nn.SiLU,
-        )
+        lastconv_output_channels = last_channel if last_channel is not None else 2 * lastconv_input_channels
 
         self.features = nn.Sequential(*layers)
-        self.avgpool = nn.AdaptiveAvgPool2d(1)
+
         self.classifier = nn.Sequential(
-            nn.Dropout(p=dropout, inplace=True),
-            nn.Linear(lastconv_output_channels, num_classes),
+            nn.Conv2d(
+                in_channels=lastconv_input_channels,
+                out_channels=MAX_MOVE_LABEL_NUM,
+                kernel_size=1,
+                bias=True,
+            ),
+            nn.Flatten(1),
         )
+
         self.regressor = nn.Sequential(
+            Conv2dNormActivation(
+                lastconv_input_channels,
+                MAX_MOVE_LABEL_NUM, # lastconv_output_channels,
+                kernel_size=1,
+                norm_layer=norm_layer,
+                activation_layer=nn.SiLU,
+            ),
+            nn.Flatten(1),
             nn.Dropout(p=dropout, inplace=True),
-            nn.Linear(lastconv_output_channels, 256),
-            nn.SiLU(),
-            nn.Linear(256, 1),
+            nn.Linear(9*9*MAX_MOVE_LABEL_NUM, fcl),
+            nn.Linear(fcl, 1),
         )
 
         for m in self.modules():
@@ -322,18 +306,13 @@ class PolicyValueNetworkV2(nn.Module):
         x = self.features(u1)
 
         # policy head
-        policy = self.policy_conv(x)
-        policy = self.avgpool(policy)
-        policy = torch.flatten(policy, 1)
-        policy = self.classifier(policy)
+        policy = self.classifier(x)
 
         # value head
-        value = self.policy_conv(x)
-        value = self.avgpool(value)
-        value = torch.flatten(value, 1)
-        value = self.regressor(value)
+        value = self.regressor(x)
 
         return (policy, value)
+
 
     def forward(self, x1: Tensor, x2: Tensor) -> tuple([Tensor, Tensor]):
         return self._forward_impl(x1, x2)
