@@ -9,6 +9,7 @@ from dlshogi.network.policy_value_network import policy_value_network
 from dlshogi import serializers
 from dlshogi.data_loader import Hcpe3DataLoader
 from dlshogi.data_loader import DataLoader
+import dlshogi
 
 
 import argparse
@@ -289,6 +290,35 @@ def main(*argv, optuna_trial=None):
                 y1_max = 80 - y1_max
             table.add_data(t, label, image, board.turn, cshogi.move_to_usi(hcpevec[j]['bestMove16']), cshogi.SQUARE_NAMES[y1_max % 81], t2[j].item(), value[j].item(), y2[j].item(), loss_policy[j], loss_result[j], loss_value[j], loss_sum[j].item(), board.sfen())
             png_file.close()
+
+    def save_model(onnx=False):
+        # save model
+        if args.model is None:
+            return
+
+        if args.use_swa and epoch >= args.swa_start_epoch:
+            logging.info('Updating batch normalization')
+            forward_ = swa_model.forward
+            swa_model.forward = lambda x : forward_(**x)
+            with torch.cuda.amp.autocast(enabled=args.use_amp):
+                update_bn(hcpe_loader(train_data, args.batchsize), swa_model)
+            del swa_model.forward
+
+            # print test loss with swa model
+            test_loss1, test_loss2, test_loss3, test_loss, test_accuracy1, test_accuracy2, test_entropy1, test_entropy2 = test(swa_model)
+
+            logging.info('epoch = {}, steps = {}, swa test loss = {:.07f}, {:.07f}, {:.07f}, {:.07f}, swa test accuracy = {:.07f}, {:.07f}, swa test entropy = {:.07f}, {:.07f}'.format(
+                epoch, t,
+                test_loss1, test_loss2, test_loss3, test_loss,
+                test_accuracy1, test_accuracy2,
+                test_entropy1, test_entropy2))
+
+        model_path = args.model.format(**{'epoch':epoch, 'step':t})
+        logging.info('Saving the model to {}'.format(model_path))
+        serializers.save_npz(model_path, swa_model.module if args.use_swa else model)
+    
+        if onnx:
+            dlshogi.convert_model_to_onnx.main(*['--network', args.network, model_path, model_path + '.onnx'])
     
     # train
     steps = 0
@@ -378,6 +408,7 @@ def main(*argv, optuna_trial=None):
                     if optuna_trial is not None:
                         optuna_trial.report(loss.item(), optuna_step)
                         if optuna_trial.should_prune():
+                            logging.info(f"trial pruned.")
                             raise optuna.TrialPruned()
                     
                     if loss.item() >= min_loss:
@@ -388,6 +419,8 @@ def main(*argv, optuna_trial=None):
                     else:
                         no_progress = 0
                         min_loss = loss.item()
+                        # if optuna_step >= 30:
+                        save_model()
 
                 steps_epoch += steps
                 sum_loss1_epoch += sum_loss1
@@ -431,29 +464,29 @@ def main(*argv, optuna_trial=None):
             break
 
     # save model
-    if args.model:
-        if args.use_swa and epoch >= args.swa_start_epoch:
-            logging.info('Updating batch normalization')
-            forward_ = swa_model.forward
-            swa_model.forward = lambda x : forward_(**x)
-            with torch.cuda.amp.autocast(enabled=args.use_amp):
-                update_bn(hcpe_loader(train_data, args.batchsize), swa_model)
-            del swa_model.forward
+    # if args.model:
+    #     if args.use_swa and epoch >= args.swa_start_epoch:
+    #         logging.info('Updating batch normalization')
+    #         forward_ = swa_model.forward
+    #         swa_model.forward = lambda x : forward_(**x)
+    #         with torch.cuda.amp.autocast(enabled=args.use_amp):
+    #             update_bn(hcpe_loader(train_data, args.batchsize), swa_model)
+    #         del swa_model.forward
 
-            # print test loss with swa model
-            test_loss1, test_loss2, test_loss3, test_loss, test_accuracy1, test_accuracy2, test_entropy1, test_entropy2 = test(swa_model)
+    #         # print test loss with swa model
+    #         test_loss1, test_loss2, test_loss3, test_loss, test_accuracy1, test_accuracy2, test_entropy1, test_entropy2 = test(swa_model)
 
-            logging.info('epoch = {}, steps = {}, swa test loss = {:.07f}, {:.07f}, {:.07f}, {:.07f}, swa test accuracy = {:.07f}, {:.07f}, swa test entropy = {:.07f}, {:.07f}'.format(
-                epoch, t,
-                test_loss1, test_loss2, test_loss3, test_loss,
-                test_accuracy1, test_accuracy2,
-                test_entropy1, test_entropy2))
+    #         logging.info('epoch = {}, steps = {}, swa test loss = {:.07f}, {:.07f}, {:.07f}, {:.07f}, swa test accuracy = {:.07f}, {:.07f}, swa test entropy = {:.07f}, {:.07f}'.format(
+    #             epoch, t,
+    #             test_loss1, test_loss2, test_loss3, test_loss,
+    #             test_accuracy1, test_accuracy2,
+    #             test_entropy1, test_entropy2))
 
-        model_path = args.model.format(**{'epoch':epoch, 'step':t})
-        logging.info('Saving the model to {}'.format(model_path))
-        serializers.save_npz(model_path, swa_model.module if args.use_swa else model)
+    #     model_path = args.model.format(**{'epoch':epoch, 'step':t})
+    #     logging.info('Saving the model to {}'.format(model_path))
+    #     serializers.save_npz(model_path, swa_model.module if args.use_swa else model)
     
-    return loss.item()
+    return min_loss
 
 if __name__ == '__main__':
     main(*sys.argv[1:])
