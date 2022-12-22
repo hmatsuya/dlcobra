@@ -5,7 +5,8 @@ study_name=highlow
 command=/home/hmatsuya/workspace/Shogi/DeepLearningShogiOriginal/usi/bin/usi
 
 games=300
-byoyomi=800
+# byoyomi=800
+byoyomi=2400
 
 opening=/home/hmatsuya/workspace/Shogi/20221128_matsuyamasan/even/kgr.even28.sfen
 opening_moves=28
