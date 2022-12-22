@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
@@ -218,7 +218,7 @@ def main(*argv, optuna_trial=None):
                 loss1 = cross_entropy_loss(y1, t1).mean()
                 loss2 = bce_with_logits_loss(y2, t2)
                 loss3 = bce_with_logits_loss(y2, value)
-                loss = loss1 * ((1 - args.val_lambda) * loss2 + args.val_lambda * loss3)
+                loss = loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3
                 sum_test_loss1 += loss1.item()
                 sum_test_loss2 += loss2.item()
                 sum_test_loss3 += loss3.item()
@@ -361,7 +361,7 @@ def main(*argv, optuna_trial=None):
                     loss1 += args.beta * (F.softmax(y1, dim=1) * F.log_softmax(y1, dim=1)).sum(dim=1).mean()
                 loss2 = bce_with_logits_loss(y2, t2)
                 loss3 = bce_with_logits_loss(y2, value)
-                loss = loss1 * ((1 - args.val_lambda) * loss2 + args.val_lambda * loss3)
+                loss = loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3
 
             scaler.scale(loss).backward()
             if args.clip_grad_max_norm:
