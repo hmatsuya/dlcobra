@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
@@ -350,7 +350,7 @@ def main(*argv, optuna_trial=None):
                     z = t2.view(-1) - value.view(-1) + 0.5
                     loss1 = (loss1 * z).mean()
                 elif args.use_result_critic:
-                    z = t2.view(-1) * (2 - args.critic_lambda) + args.critic_lambda
+                    z = t2.view(-1) * (1 - args.critic_lambda) + args.critic_lambda
                     loss1 = (loss1 * z).mean()
                 elif args.use_value_critic:
                     z = F.softplus(value.view(-1) - torch.sigmoid(y2.view(-1)), beta=1.5)
