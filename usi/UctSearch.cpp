@@ -15,6 +15,7 @@
 #include <thread>
 #include <random>
 #include <queue>
+#include <vector>
 
 #include "fastmath.h"
 #include "Message.h"
@@ -157,6 +158,8 @@ float random_temperature_drop = 1.0f;
 float random_cutoff = 0.015f;
 float random_cutoff_drop = 0.0f;
 std::unique_ptr<std::mt19937_64> random_mt_64;
+float random_noise_alpha = 0.0f;
+float random_noise_weight = 0.0f;
 
 #ifdef PV_MATE_SEARCH
 // PVの詰み探索
@@ -581,7 +584,7 @@ void SetEvalCoef(const int eval_coef)
 }
 
 // ランダムムーブの設定
-void SetRandomMove(const int ply, const int temperature, const int temperature_drop, const int cutoff, const int cutoff_drop)
+void SetRandomMove(const int ply, const int temperature, const int temperature_drop, const int cutoff, const int cutoff_drop, const int noise_alpha, const int noise_weight)
 {
 	random_ply = ply;
 	random_temperature = temperature / 1000.0f;
@@ -592,6 +595,8 @@ void SetRandomMove(const int ply, const int temperature, const int temperature_d
 		std::random_device seed_gen;
 		random_mt_64.reset(new std::mt19937_64(seed_gen()));
 	}
+	random_noise_alpha = noise_alpha / 1000.0f;
+	random_noise_weight = noise_weight / 1000.0f;
 }
 
 /////////////////////////
@@ -798,6 +803,28 @@ inline std::tuple<std::string, int, int, Move, float, Move> get_pv(const uct_nod
 	return std::make_tuple(pv, cp, depth, move, best_wp, ponderMove);
 }
 
+std::vector<double> generate_gamma(double alpha, double beta, int size) {
+    std::gamma_distribution<double> d(alpha, beta);
+    
+    std::vector<double> v(size);
+    for(auto& i : v) {
+        i = d(*random_mt_64);
+    }
+
+    return v;
+}
+
+std::vector<double> generate_dirichlet(int dim, double alpha) {
+    auto gammas = generate_gamma(alpha, 1, dim);
+
+    double sum = std::accumulate(gammas.begin(), gammas.end(), 0.0);
+    for(auto& i : gammas) {
+        i /= sum;
+    }
+    
+    return gammas;
+}
+
 // 訪問回数に応じてランダムに子ノードを選択
 inline unsigned int select_random_child_node(const uct_node_t* uct_node)
 {
@@ -816,10 +843,12 @@ inline unsigned int select_random_child_node(const uct_node_t* uct_node)
 	const int step = (pos_root->gamePly() - 1) / 2;
 	const float cutoff = std::max(0.0f, random_cutoff - random_cutoff_drop * step);
 	const auto cutoff_threshold = max_move_count_child->win / max_move_count_child->move_count - cutoff;
+	if (debug_message) cout << "cutoff_threshold: " << cutoff_threshold << std::endl;
 	vector<double> probabilities;
 	probabilities.reserve(child_num);
 	const float temperature = std::max(0.1f, random_temperature - random_temperature_drop * step);
 	const float reciprocal_temperature = 1.0f / temperature;
+	double sum = 0.0f;
 	for (int i = 0; i < child_num; i++) {
 		if (sorted_uct_childs[i]->move_count == 0) break;
 
@@ -828,10 +857,19 @@ inline unsigned int select_random_child_node(const uct_node_t* uct_node)
 
 		const auto probability = std::pow((float)sorted_uct_childs[i]->move_count, reciprocal_temperature);
 		probabilities.emplace_back(probability);
+		sum += probability;
+	}
+
+	auto noises = generate_dirichlet(child_num, random_noise_alpha);
+	for (int i = 0; i < child_num; ++i) {
+		if (! sorted_uct_childs[i]->move_count) break;
+
+		double raw_probability = probabilities[i] / sum;
+		probabilities[i] = (raw_probability * (1 - random_noise_weight)) + noises[i] * random_noise_weight;
 		if (debug_message)
 			std::cout << sorted_uct_childs[i]->move.toUSI() << " move_count:" << sorted_uct_childs[i]->move_count
 			<< " nnrate:" << sorted_uct_childs[i]->nnrate << " win_rate:" << sorted_uct_childs[i]->win / (sorted_uct_childs[i]->move_count)
-			<< " probability:" << probability << std::endl;
+			<< " probability:" << raw_probability << " noise:" << noises[i] << " sum:" << probabilities[i] << std::endl;
 	}
 
 	// 訪問回数に応じた確率で選択
