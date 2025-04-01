@@ -1,6 +1,5 @@
-import numpy as np
+﻿import numpy as np
 import torch
-import torch.optim as optim
 import torch.nn.functional as F
 from torch.optim.swa_utils import AveragedModel, update_bn
 
@@ -13,9 +12,7 @@ import dlshogi
 
 
 import argparse
-import random
 import sys
-import os
 import re
 import multiprocessing
 
@@ -70,6 +67,9 @@ def main(*argv, optuna_trial=None):
     parser.add_argument('--run_id', type=str, default=None, help='wandb run id and name')
     parser.add_argument('--patience', type=int, default=-1, help='patience for early stopping')
     parser.add_argument('--hflip', type=float, default=0.0, help='probability of horizontal flip')
+    parser.add_argument('--notfreeze', nargs='+', help='names of layers not to freeze')
+    parser.add_argument('--policy_loss', type=float, default=1.0, help='weight of policy loss')
+    parser.add_argument('--result_loss', type=float, default=1.0, help='weight of result loss')
     args = parser.parse_args(argv)
 
 
@@ -99,6 +99,24 @@ def main(*argv, optuna_trial=None):
     model = policy_value_network(args.network)
     model.to(device)
 
+    if args.notfreeze:
+        for name, layer in model.named_modules():
+            if name in args.notfreeze:
+                logging.info(f"{name} is not freezing")
+                # layer.requires_grad = True    
+                for p in layer.parameters():
+                    p.requires_grad is True
+            else:
+                # layer.requires_grad = False    
+                for p in layer.parameters():
+                    p.requires_grad is False
+    
+    # if args.notfreeze:
+    #     for child in model.children():
+    #         if child.name not in args.notfreeze:
+    #             for param in child.parameters():
+    #                 param.requires_grad = False
+
     if args.project is not None:
         wandb.init(project=args.project, id=args.run_id, name=args.run_id.split('.')[0])
         wandb.config.update(args, allow_val_change=True)
@@ -107,16 +125,17 @@ def main(*argv, optuna_trial=None):
 
     if args.optimizer[-1] != ')':
         args.optimizer += '()'
-    optimizer = eval('optim.' + args.optimizer.replace('(', '(model.parameters(),lr=args.lr,' + 'weight_decay=args.weight_decay,' if args.weight_decay >= 0 else ''))
+    optimizer = eval('torch.optim.' + args.optimizer.replace('(', '(filter(lambda p: p.requires_grad, model.parameters()),lr=args.lr,' + 'weight_decay=args.weight_decay,' if args.weight_decay >= 0 else ''))
     if args.lr_scheduler:
         if args.lr_scheduler[-1] != ')':
             args.lr_scheduler += '()'
-        scheduler = eval('optim.lr_scheduler.' + args.lr_scheduler.replace('(', '(optimizer,'))
+        scheduler = eval('torch.optim.lr_scheduler.' + args.lr_scheduler.replace('(', '(optimizer,'))
     if args.use_swa:
         logging.info(f'use swa(swa_start_epoch={args.swa_start_epoch}, swa_freq={args.swa_freq}, swa_n_avr={args.swa_n_avr})')
         ema_a = args.swa_n_avr / (args.swa_n_avr + 1)
         ema_b = 1 / (args.swa_n_avr + 1)
-        ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged : ema_a * averaged_model_parameter + ema_b * model_parameter
+        def ema_avg(averaged_model_parameter, model_parameter, num_averaged):
+            return ema_a * averaged_model_parameter + ema_b * model_parameter
         swa_model = AveragedModel(model, avg_fn=ema_avg)
     def cross_entropy_loss_with_soft_target(pred, soft_targets):
         return torch.sum(-soft_targets * F.log_softmax(pred, dim=1), 1)
@@ -191,8 +210,11 @@ def main(*argv, optuna_trial=None):
         for x1, x2, t1, t2, value in Hcpe3DataLoader(data, batchsize, device):
             yield { 'x1':x1, 'x2':x2 }
 
-    def accuracy(y, t):
-        return (torch.max(y, 1)[1] == t).sum().item() / len(t)
+    def accuracy(y, t, t2=None):
+        if y2 is not None:
+            return ((torch.max(y, 1)[1] == t) * torch.flatten(t2)).sum().item() / t2.sum()
+        else:
+            return (torch.max(y, 1)[1] == t).sum().item() / len(t)
 
     def binary_accuracy(y, t):
         pred = y >= 0
@@ -215,15 +237,19 @@ def main(*argv, optuna_trial=None):
                 y1, y2 = model(x1, x2)
 
                 steps += 1
-                loss1 = cross_entropy_loss(y1, t1).mean()
+                if args.use_result_critic:
+                    z = t2.view(-1) * (1 - args.critic_lambda) + args.critic_lambda
+                    loss1 = (cross_entropy_loss(y1, t1) * z).mean()
+                else:
+                    loss1 = cross_entropy_loss(y1, t1).mean()
                 loss2 = bce_with_logits_loss(y2, t2)
                 loss3 = bce_with_logits_loss(y2, value)
-                loss = loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3
+                loss = loss1 * args.policy_loss + ((1 - args.val_lambda) * loss2 + args.val_lambda * loss3) * args.result_loss
                 sum_test_loss1 += loss1.item()
                 sum_test_loss2 += loss2.item()
                 sum_test_loss3 += loss3.item()
                 sum_test_loss += loss.item()
-                sum_test_accuracy1 += accuracy(y1, t1)
+                sum_test_accuracy1 += accuracy(y1, t1, t2)
                 sum_test_accuracy2 += binary_accuracy(y2, t2)
 
                 entropy1 = (- F.softmax(y1, dim=1) * F.log_softmax(y1, dim=1)).sum(dim=1)
@@ -290,28 +316,47 @@ def main(*argv, optuna_trial=None):
                 y1_max = 80 - y1_max
             table.add_data(t, label, image, board.turn, cshogi.move_to_usi(hcpevec[j]['bestMove16']), cshogi.SQUARE_NAMES[y1_max % 81], t2[j].item(), value[j].item(), y2[j].item(), loss_policy[j], loss_result[j], loss_value[j], loss_sum[j].item(), board.sfen())
             png_file.close()
+    
+    def update_batchnorm():
+        # if args.use_swa and epoch >= args.swa_start_epoch:
+        logging.info('Updating batch normalization')
+        forward_ = swa_model.forward
+        swa_model.forward = lambda x : forward_(**x)
+        with torch.cuda.amp.autocast(enabled=args.use_amp):
+            update_bn(hcpe_loader(train_data, args.batchsize), swa_model)
+        del swa_model.forward
+
+        # print test loss with swa model
+        test_loss1, test_loss2, test_loss3, test_loss, test_accuracy1, test_accuracy2, test_entropy1, test_entropy2 = test(swa_model)
+
+        logging.info('epoch = {}, steps = {}, swa test loss = {:.07f}, {:.07f}, {:.07f}, {:.07f}, swa test accuracy = {:.07f}, {:.07f}, swa test entropy = {:.07f}, {:.07f}'.format(
+            epoch, t,
+            test_loss1, test_loss2, test_loss3, test_loss,
+            test_accuracy1, test_accuracy2,
+            test_entropy1, test_entropy2))
+        return test_loss
 
     def save_model(onnx=False):
         # save model
         if args.model is None:
             return
 
-        if args.use_swa and epoch >= args.swa_start_epoch:
-            logging.info('Updating batch normalization')
-            forward_ = swa_model.forward
-            swa_model.forward = lambda x : forward_(**x)
-            with torch.cuda.amp.autocast(enabled=args.use_amp):
-                update_bn(hcpe_loader(train_data, args.batchsize), swa_model)
-            del swa_model.forward
+        # if args.use_swa and epoch >= args.swa_start_epoch:
+        #     logging.info('Updating batch normalization')
+        #     forward_ = swa_model.forward
+        #     swa_model.forward = lambda x : forward_(**x)
+        #     with torch.cuda.amp.autocast(enabled=args.use_amp):
+        #         update_bn(hcpe_loader(train_data, args.batchsize), swa_model)
+        #     del swa_model.forward
 
-            # print test loss with swa model
-            test_loss1, test_loss2, test_loss3, test_loss, test_accuracy1, test_accuracy2, test_entropy1, test_entropy2 = test(swa_model)
+        #     # print test loss with swa model
+        #     test_loss1, test_loss2, test_loss3, test_loss, test_accuracy1, test_accuracy2, test_entropy1, test_entropy2 = test(swa_model)
 
-            logging.info('epoch = {}, steps = {}, swa test loss = {:.07f}, {:.07f}, {:.07f}, {:.07f}, swa test accuracy = {:.07f}, {:.07f}, swa test entropy = {:.07f}, {:.07f}'.format(
-                epoch, t,
-                test_loss1, test_loss2, test_loss3, test_loss,
-                test_accuracy1, test_accuracy2,
-                test_entropy1, test_entropy2))
+        #     logging.info('epoch = {}, steps = {}, swa test loss = {:.07f}, {:.07f}, {:.07f}, {:.07f}, swa test accuracy = {:.07f}, {:.07f}, swa test entropy = {:.07f}, {:.07f}'.format(
+        #         epoch, t,
+        #         test_loss1, test_loss2, test_loss3, test_loss,
+        #         test_accuracy1, test_accuracy2,
+        #         test_entropy1, test_entropy2))
 
         model_path = args.model.format(**{'epoch':epoch, 'step':t})
         logging.info('Saving the model to {}'.format(model_path))
@@ -319,6 +364,21 @@ def main(*argv, optuna_trial=None):
     
         if onnx:
             dlshogi.convert_model_to_onnx.main(*['--network', args.network, model_path, model_path + '.onnx'])
+    
+    def is_early_stopping(loss):
+        nonlocal min_loss, no_progress
+        if loss >= min_loss:
+            no_progress += 1
+            if args.patience >= 0 and no_progress > args.patience:
+                logging.info(f"early stop; patience={args.patience}")
+                return True
+        else:
+            no_progress = 0
+            min_loss = loss
+            # if optuna_step >= 30:
+            save_model()
+
+        return False
     
     # train
     steps = 0
@@ -361,7 +421,7 @@ def main(*argv, optuna_trial=None):
                     loss1 += args.beta * (F.softmax(y1, dim=1) * F.log_softmax(y1, dim=1)).sum(dim=1).mean()
                 loss2 = bce_with_logits_loss(y2, t2)
                 loss3 = bce_with_logits_loss(y2, value)
-                loss = loss1 + (1 - args.val_lambda) * loss2 + args.val_lambda * loss3
+                loss = loss1 * args.policy_loss + ((1 - args.val_lambda) * loss2 + args.val_lambda * loss3) * args.result_loss
 
             scaler.scale(loss).backward()
             if args.clip_grad_max_norm:
@@ -386,41 +446,48 @@ def main(*argv, optuna_trial=None):
                 with torch.no_grad():
                     y1, y2 = model(x1, x2)
 
-                    loss1 = (loss1_noreduce := cross_entropy_loss(y1, t1)).mean()
+                    z = 1.0
+                    if args.use_result_critic:
+                        z = t2.view(-1) * (1 - args.critic_lambda) + args.critic_lambda
+                    loss1 = (loss1_noreduce := cross_entropy_loss(y1, t1) * z).mean()
                     loss2 = (loss2_noreduce := torch.flatten(bce_with_logits_loss_noreduce(y2, t2))).mean()
                     loss3 = (loss3_noreduce := torch.flatten(bce_with_logits_loss_noreduce(y2, value))).mean()
-                    loss = (loss_noreduce := loss1_noreduce + ((1 - args.val_lambda) * loss2_noreduce + args.val_lambda * loss3_noreduce)).mean()
+                    loss = (loss_noreduce := loss1_noreduce * args.policy_loss + ((1 - args.val_lambda) * loss2_noreduce + args.val_lambda * loss3_noreduce) * args.result_loss).mean()
 
                     logging.info('epoch = {}, steps = {}, train loss = {:.07f}, {:.07f}, {:.07f}, {:.07f}, test loss = {:.07f}, {:.07f}, {:.07f}, {:.07f}, test accuracy = {:.07f}, {:.07f}'.format(
                         epoch, t,
                         sum_loss1 / steps, sum_loss2 / steps, sum_loss3 / steps, sum_loss / steps,
                         loss1.item(), loss2.item(), loss3.item(), loss.item(),
-                        accuracy(y1, t1), binary_accuracy(y2, t2)))
+                        accuracy(y1, t1, t2), binary_accuracy(y2, t2)))
 
                     optuna_step = int(t / eval_interval)
                     if args.project is not None:
                         wandb.log({
                             "train/loss_policy": sum_loss1 / steps, "train/loss_result": sum_loss2 / steps, "train/loss_value": sum_loss3 / steps, "train/loss_sum": sum_loss / steps,
-                            "valid/loss_policy": loss1.item(), "valid/loss_result": loss2.item(), "valid/loss_value": loss3.item(), "valid/loss_sum": loss.item(), "valid_acc/acc_policy": accuracy(y1, t1), "valid_acc/acc_result": binary_accuracy(y2,t2),
+                            "valid/loss_policy": loss1.item(), "valid/loss_result": loss2.item(), "valid/loss_value": loss3.item(), "valid/loss_sum": loss.item(), "valid_acc/acc_policy": accuracy(y1, t1, t2), "valid_acc/acc_result": binary_accuracy(y2,t2),
                         }, step=optuna_step)
                         log_example(t, hcpevec, loss1_noreduce, loss2_noreduce, loss3_noreduce, loss_noreduce, t1, t2, value, y1, y2)
 
                     if optuna_trial is not None:
                         optuna_trial.report(loss.item(), optuna_step)
                         if optuna_trial.should_prune():
-                            logging.info(f"trial pruned.")
+                            logging.info("trial pruned.")
                             raise optuna.TrialPruned()
-                    
-                    if loss.item() >= min_loss:
-                        no_progress += 1
-                        if args.patience >= 0 and no_progress > args.patience:
-                            early_stop = True
-                            logging.info(f"early stop; patience={args.patience}")
-                    else:
-                        no_progress = 0
-                        min_loss = loss.item()
-                        # if optuna_step >= 30:
-                        save_model()
+                
+
+                if not args.use_swa:
+                    early_stop = is_early_stopping(loss.item())
+
+                    # if loss.item() >= min_loss:
+                    #     no_progress += 1
+                    #     if args.patience >= 0 and no_progress > args.patience:
+                    #         early_stop = True
+                    #         logging.info(f"early stop; patience={args.patience}")
+                    # else:
+                    #     no_progress = 0
+                    #     min_loss = loss.item()
+                    #     # if optuna_step >= 30:
+                    #     save_model()
 
                 steps_epoch += steps
                 sum_loss1_epoch += sum_loss1
@@ -460,6 +527,10 @@ def main(*argv, optuna_trial=None):
         if args.checkpoint:
             save_checkpoint()
 
+        if args.use_swa and epoch >= args.swa_start_epoch:
+            swa_loss = update_batchnorm()
+            is_early_stopping(swa_loss)
+
         if early_stop:
             break
 
@@ -486,6 +557,7 @@ def main(*argv, optuna_trial=None):
     #     logging.info('Saving the model to {}'.format(model_path))
     #     serializers.save_npz(model_path, swa_model.module if args.use_swa else model)
     
+    assert(min_loss is not None)
     return min_loss
 
 if __name__ == '__main__':
