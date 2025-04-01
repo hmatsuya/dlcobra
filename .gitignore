@@ -256,3 +256,9 @@ ModelManifest.xml
 /dist
 lightning_logs/
 .vscode/
+
+wandb/
+*.so
+model/
+*.pgn
+.ipynb_checkpoints
