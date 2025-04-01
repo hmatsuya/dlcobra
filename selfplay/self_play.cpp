@@ -89,6 +89,10 @@ string usi_options;
 int usi_byoyomi;
 int usi_turn; // 0:先手、1:後手、それ以外:ランダム
 
+// Dirichlet noise
+int random_noise_alpha;
+int random_noise_weight;
+
 std::mutex mutex_all_gpu;
 
 int MAX_MOVE = 320; // 最大手数
@@ -331,6 +335,7 @@ public:
 		states(MAX_MOVE + 1) {
 		pos_root = new Position(DefaultStartPositionSFEN, s.thisptr);
 		usi_engine_turn = (grp->usi_engines.size() > 0 && id < usi_engine_num) ? rnd(*mt) % 2 : -1;
+		logger->info("id:{}, usi_engine_turn:{}", id, usi_engine_turn);
 		noise_count.reserve(UCT_CHILD_MAX);
 	}
 	UCTSearcher(UCTSearcher&& o) : nn_cache(o.nn_cache) {} // not use
@@ -1641,6 +1646,8 @@ int main(int argc, char* argv[]) {
 			("usi_byoyomi", "USI byoyomi", cxxopts::value<int>(usi_byoyomi)->default_value("500"))
 			("usi_turn", "USIEngine turn", cxxopts::value<int>(usi_turn)->default_value("-1"))
 			("h,help", "Print help")
+			("random_noise_alpha", "Alpha of Dirichlet noise", cxxopts::value<int>(random_noise_alpha)->default_value("30"))
+			("random_noise_weight", "Weight of Dirichlet noise", cxxopts::value<int>(random_noise_weight)->default_value("250"))
 			;
 		options.parse_positional({ "modelfile", "hcp", "output", "nodes", "playout_num", "gpu_id", "batchsize", "positional" });
 
@@ -1766,6 +1773,8 @@ int main(int argc, char* argv[]) {
 	logger->info("usi_options:{}", usi_options);
 	logger->info("usi_byoyomi:{}", usi_byoyomi);
 	logger->info("usi_turn:{}", usi_turn);
+	logger->info("random_noise_alpha:{}", random_noise_alpha);
+	logger->info("random_noise_weight:{}", random_noise_weight);
 
 	initTable();
 	Position::initZobrist();
