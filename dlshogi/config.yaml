@@ -13,6 +13,8 @@ trainer:
         save_on_train_epoch_end: true
         monitor: val/loss
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+  logger: WandbLogger
+  logger.project: wcsc35
 model:
   network: resnet10_relu
   val_lambda: 0.333
