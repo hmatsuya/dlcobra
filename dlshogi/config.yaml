@@ -109,9 +109,12 @@ model:
   resume_model: null
 data:
   train_files:
-  - /mnt/nvme1n1p2/data/shogi-ai-book/floodgate_2019-2021_r3500-001.hcpe
+  - /mnt/nvme1n1p2/data/shogi-ai-book/floodgate_2019-2021_r3500-00*.hcpe
+  - /mnt/nvme1n1p2/data/shogi-ai-book/suisho*.hcpe
+  - /mnt/nvme1n1p2/data/shogi-ai-book/dlshogi*.hcpe
   val_files:
-  - /mnt/nvme1n1p2/data/shogi-ai-book/floodgate_2019-2021_r3500-024.hcpe
+  - /mnt/nvme1n1p2/data/shogi-ai-book/floodgate_2019-2021_r3500-01*.hcpe
+  - /mnt/nvme1n1p2/data/shogi-ai-book/floodgate_2019-2021_r3500-02*.hcpe
   batch_size: 1024
   val_batch_size: 1024
   use_average: true
