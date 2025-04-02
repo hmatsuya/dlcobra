@@ -1,18 +1,100 @@
-# lightning.pytorch==2.2.0.post0
+# lightning.pytorch==2.5.1
 seed_everything: 0
 trainer:
   max_epochs: 4
   sync_batchnorm: false
   val_check_interval: 0.5
   precision: 16-mixed
-  gradient_clip_val: 10.0
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      name: null
+      save_dir: ./wandb
+      version: null
+      offline: false
+      dir: null
+      id: null
+      anonymous: null
+      project: wcsc25
+      log_model: all
+      experiment: null
+      prefix: ''
+      checkpoint_name: null
+      entity: null
+      notes: null
+      tags: null
+      config: null
+      config_exclude_keys: null
+      config_include_keys: null
+      allow_val_change: null
+      group: null
+      job_type: null
+      mode: null
+      force: null
+      reinit: null
+      resume: null
+      resume_from: null
+      fork_from: null
+      save_code: null
+      tensorboard: null
+      sync_tensorboard: null
+      monitor_gym: null
+      settings: null
   callbacks:
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-      init_args:
-        save_top_k: -1
-        save_on_train_epoch_end: true
-        monitor: val/loss
-    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      dirpath: null
+      filename: null
+      monitor: val/loss
+      verbose: false
+      save_last: null
+      save_top_k: -1
+      save_weights_only: false
+      mode: min
+      auto_insert_metric_name: true
+      every_n_train_steps: null
+      train_time_interval: null
+      every_n_epochs: null
+      save_on_train_epoch_end: true
+      enable_version_counter: true
+  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+    init_args:
+      logging_interval: null
+      log_momentum: false
+      log_weight_decay: false
+  fast_dev_run: false
+  max_epochs: 4
+  min_epochs: null
+  max_steps: -1
+  min_steps: null
+  max_time: null
+  limit_train_batches: null
+  limit_val_batches: null
+  limit_test_batches: null
+  limit_predict_batches: null
+  overfit_batches: 0.0
+  val_check_interval: 0.5
+  check_val_every_n_epoch: 1
+  num_sanity_val_steps: null
+  log_every_n_steps: null
+  enable_checkpointing: null
+  enable_progress_bar: null
+  enable_model_summary: null
+  accumulate_grad_batches: 1
+  gradient_clip_val: 10.0
+  gradient_clip_algorithm: null
+  deterministic: null
+  benchmark: null
+  inference_mode: true
+  use_distributed_sampler: true
+  profiler: null
+  detect_anomaly: false
+  barebones: false
+  plugins: null
+  sync_batchnorm: false
+  reload_dataloaders_every_n_epochs: 0
+  default_root_dir: null
+  model_registry: null
 model:
   network: resnet10_relu
   val_lambda: 0.333
@@ -22,36 +104,47 @@ model:
   ema_start_epoch: 1
   ema_freq: 250
   ema_decay: 0.9
-  model_filename: model-{epoch:03}
   lr_scheduler_interval: step
+  model_filename: model-{epoch:03}
+  resume_model: null
 data:
   train_files:
-    - F:\hcpe3\floodgate_2022_0214_r3800_nomate.hcpe3
+  - /mnt/nvme1n1p2/data/shogi-ai-book/floodgate_2019-2021_r3500-001.hcpe
   val_files:
-    - F:\hcpe3\floodgate.hcpe
+  - /mnt/nvme1n1p2/data/shogi-ai-book/floodgate_2019-2021_r3500-024.hcpe
   batch_size: 1024
   val_batch_size: 1024
   use_average: true
   use_evalfix: true
   temperature: 1.0
+  patch: null
   cache: null
 optimizer:
   class_path: torch.optim.AdamW
   init_args:
-    lr: 1e-4
+    lr: 0.0001
     betas:
     - 0.9
     - 0.999
-    eps: 1e-08
-    weight_decay: 1e-2
+    eps: 1.0e-08
+    weight_decay: 0.01
+    amsgrad: false
+    maximize: false
+    foreach: null
+    capturable: false
+    differentiable: false
+    fused: null
 lr_scheduler:
   class_path: dlshogi.lr_scheduler.CosineLRScheduler
   init_args:
     t_initial: 100
-    lr_min: 1e-8
+    lr_min: 1.0e-08
     cycle_mul: 2
-    cycle_limit: 8
     cycle_decay: 0.5
+    cycle_limit: 8
     warmup_t: 10
-    warmup_lr_init: 1e-7
+    warmup_lr_init: 1.0e-07
     warmup_prefix: true
+    k_decay: 1.0
+    last_epoch: -1
+ckpt_path: null
