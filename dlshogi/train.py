@@ -1,10 +1,10 @@
-import numpy as np
+﻿import numpy as np
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.optim.swa_utils import AveragedModel, update_bn
 
-from dlshogi.common import *
+from dlshogi.common import HuffmanCodedPosAndEval
 from dlshogi.network.policy_value_network import policy_value_network
 from dlshogi import serializers
 from dlshogi.data_loader import Hcpe3DataLoader
@@ -12,9 +12,7 @@ from dlshogi.data_loader import DataLoader
 
 
 import argparse
-import random
 import sys
-import os
 import re
 import importlib
 
@@ -128,7 +126,8 @@ def main(*argv):
         logging.info(f'use swa(swa_start_epoch={args.swa_start_epoch}, swa_freq={args.swa_freq}, swa_n_avr={args.swa_n_avr})')
         ema_a = args.swa_n_avr / (args.swa_n_avr + 1)
         ema_b = 1 / (args.swa_n_avr + 1)
-        ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged : ema_a * averaged_model_parameter + ema_b * model_parameter
+        def ema_avg(averaged_model_parameter, model_parameter, num_averaged):
+            return ema_a * averaged_model_parameter + ema_b * model_parameter
         swa_model = AveragedModel(model, avg_fn=ema_avg)
     def cross_entropy_loss_with_soft_target(pred, soft_targets):
         return torch.sum(-soft_targets * F.log_softmax(pred, dim=1), 1)
