@@ -1,7 +1,8 @@
 import numpy as np
 import torch
+import glob  # Add this import at the top of the file
 
-from dlshogi.common import *
+from dlshogi.common import HuffmanCodedPosAndEval, HuffmanCodedPosAndEval2, FEATURES1_NUM, FEATURES2_NUM, MAX_MOVE_LABEL_NUM
 from dlshogi import cppshogi
 
 import os
@@ -13,8 +14,13 @@ import logging
 class DataLoader:
     @staticmethod
     def load_files(files, logger=logging):
+        # Expand wildcards in files
+        expanded_files = []
+        for pattern in files:
+            expanded_files.extend(glob.glob(pattern))
+
         data = []
-        for path in files:
+        for path in expanded_files:
             if os.path.exists(path):
                 logger.info(path)
                 data.append(np.fromfile(path, dtype=HuffmanCodedPosAndEval))
@@ -106,8 +112,13 @@ class DataLoader:
 class Hcpe2DataLoader(DataLoader):
     @staticmethod
     def load_files(files, logger=logging):
+        # Expand wildcards in files
+        expanded_files = []
+        for pattern in files:
+            expanded_files.extend(glob.glob(pattern))
+
         data = []
-        for path in files:
+        for path in expanded_files:
             if os.path.exists(path):
                 logger.info(path)
                 data.append(np.fromfile(path, dtype=HuffmanCodedPosAndEval2))
@@ -195,7 +206,14 @@ class Hcpe3DataLoader(DataLoader):
             from scipy.optimize import curve_fit
 
         actual_len = 0
-        for path in files:
+        sum_len = 0  # Initialize sum_len to avoid UnboundLocalError
+
+        # Expand wildcards in files
+        expanded_files = []
+        for pattern in files:
+            expanded_files.extend(glob.glob(pattern))
+
+        for path in expanded_files:
             if os.path.exists(path):
                 if use_evalfix:
                     eval, result = cppshogi.hcpe3_prepare_evalfix(path)
