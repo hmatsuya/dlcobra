@@ -374,7 +374,7 @@ class CustomLightningCLI(LightningCLI):
 
 
 def main():
-    CustomLightningCLI(Model, DataModule)
+    CustomLightningCLI(Model, DataModule, save_config_kwargs={"overwrite": True})
 
 
 if __name__ == "__main__":
