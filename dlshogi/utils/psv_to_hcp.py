@@ -1,6 +1,6 @@
 import argparse
 import numpy as np
-from cshogi import *
+from cshogi import PackedSfenValue, HuffmanCodedPos, Board
 
 parser = argparse.ArgumentParser()
 parser.add_argument('psv')
