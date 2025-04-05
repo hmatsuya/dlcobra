@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, Dataset
 from dlshogi import cppshogi, serializers
 from dlshogi.common import FEATURES1_NUM, FEATURES2_NUM, MAX_MOVE_LABEL_NUM
 from dlshogi.data_loader import DataLoader as HcpeDataLoader
-from dlshogi.data_loader import Hcpe3DataLoader
+from dlshogi.data_loader import Hcpe3DataLoader, Hdf5DataLoader
 from dlshogi.network.policy_value_network import policy_value_network
 
 
@@ -53,6 +53,46 @@ class HcpeDataset(Dataset):
         )
 
         return features1, features2, move, result, value
+
+
+class Hdf5HcpeDataset(HcpeDataset):
+    def __init__(self, files):
+        logger = logging.getLogger("lightning.pytorch.core")
+        logger.info("Loading HDF5 HcpeDataset")
+        self.hcpe = Hdf5DataLoader.load_files(files, logger)
+        logger.info("position num = {}".format(len(self.hcpe)))
+
+    def __len__(self):
+        return len(self.hcpe)
+
+    def __getitems__(self, indexes):
+        batch_size = len(indexes)
+        hcpevec = self.hcpe[indexes].compute()
+
+        features1 = torch.empty(
+            (batch_size, FEATURES1_NUM, 9, 9), dtype=torch.float32, pin_memory=True
+        )
+        features2 = torch.empty(
+            (batch_size, FEATURES2_NUM, 9, 9), dtype=torch.float32, pin_memory=True
+        )
+        move = torch.empty((batch_size), dtype=torch.int64, pin_memory=True)
+        result = torch.empty((batch_size, 1), dtype=torch.float32, pin_memory=True)
+        value = torch.empty((batch_size, 1), dtype=torch.float32, pin_memory=True)
+
+        cppshogi.hcpe_decode_with_value(
+            hcpevec,
+            features1.numpy(),
+            features2.numpy(),
+            move.numpy(),
+            result.numpy(),
+            value.numpy(),
+        )
+
+        return features1, features2, move, result, value
+
+    # when destroyed
+    def __del__(self):
+        Hdf5DataLoader.close_files()
 
 
 class Hcpe3Dataset(Dataset):
@@ -137,14 +177,10 @@ class DataModule(pl.LightningDataModule):
     def setup(self, stage: str):
         # Assign train/val datasets for use in dataloaders
         if stage == "fit":
-            self.train_dataset = Hcpe3Dataset(
-                self.hparams.train_files,
-                self.hparams.use_average,
-                self.hparams.use_evalfix,
-                self.hparams.temperature,
-                self.hparams.patch,
-                self.hparams.cache,
-            )
+            # self.train_dataset = Hdf5HcpeDataset(
+            #     self.hparams.train_files,
+            # )
+            self.train_dataset = Hdf5DataLoader.load_files(self.hparams.train_files)
             self.val_dataset = HcpeDataset(self.hparams.val_files)
 
         # Assign test dataset for use in dataloader(s)
@@ -152,11 +188,12 @@ class DataModule(pl.LightningDataModule):
             self.val_dataset = HcpeDataset(self.hparams.val_files)
 
     def train_dataloader(self):
-        return DataLoader(
+        return Hdf5DataLoader(
             self.train_dataset,
             batch_size=self.hparams.batch_size,
-            shuffle=True,
-            collate_fn=collate,
+            device=torch.device('cuda'),
+            shuffle=False,
+            # collate_fn=collate,
         )
 
     def val_dataloader(self):
@@ -232,9 +269,9 @@ class Model(pl.LightningModule):
             self.log("val_lambda", self.val_lambda)
 
     def training_step(self, batch, batch_idx):
-        features1, features2, probability, result, value = batch
+        features1, features2, move, result, value = batch
         y1, y2 = self.model(features1, features2)
-        loss1 = cross_entropy_loss_with_soft_target(y1, probability).mean()
+        loss1 = cross_entropy_loss(y1, move).mean()
         loss2 = bce_with_logits_loss(y2, result)
         loss3 = bce_with_logits_loss(y2, value)
         loss = (
