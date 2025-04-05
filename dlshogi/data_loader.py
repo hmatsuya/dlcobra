@@ -10,6 +10,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 import logging
 
+import h5py
+import dask.array as da
+
 
 class DataLoader:
     @staticmethod
@@ -107,6 +110,62 @@ class DataLoader:
         self.pre_fetch()
 
         return result
+
+
+class Hdf5DataLoader(DataLoader):
+    h5files = []
+
+    @staticmethod
+    def load_files(files, logger=logging):
+        expanded_files = []
+        for pattern in files:
+            expanded_files.extend(glob.glob(pattern))
+
+        data = []
+        for path in expanded_files:
+            if os.path.exists(path):
+                logger.info(path)
+                hdf5_file = h5py.File(path, 'r')
+                if '/data' not in hdf5_file:
+                    logger.error(f"Dataset '/data' not found in {path}")
+                    continue
+                dataset = hdf5_file['/data']
+                dask_array = da.from_array(dataset, chunks=(1000000,))
+
+                __class__.h5files.append(hdf5_file)
+                data.append(dask_array)
+            else:
+                logger.warn(f"{path} not found, skipping")
+        return da.concatenate(data)
+
+    @staticmethod
+    def close_files():
+        for hdf5_file in __class__.h5files:
+            hdf5_file.close()
+        __class__.h5files = []
+
+
+    def sample(self):
+        indices = np.random.choice(len(self.data), self.batch_size, replace=False)
+        return self.mini_batch(self.data[indices].compute())
+
+    def pre_fetch(self):
+        hcpevec = self.data[self.i : self.i + self.batch_size].compute()
+        self.i += self.batch_size
+        if len(hcpevec) < self.batch_size:
+            return
+
+        self.f = self.executor.submit(self.mini_batch, hcpevec)
+
+    def __iter__(self):
+        self.i = 0
+        if self.shuffle:
+            print("WARN: shuffle option not implemented. Shuffle the data manually.")
+        self.pre_fetch()
+        return self
+
+    def __del__(self):
+        self.close_files()
 
 
 class Hcpe2DataLoader(DataLoader):
