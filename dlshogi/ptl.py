@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from lightning.pytorch.callbacks.progress.tqdm_progress import Tqdm, TQDMProgressBar
 from lightning.pytorch.cli import LightningCLI
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn, update_bn
+from torch.optim.swa_utils import AveragedModel, get_ema_multi_avg_fn, update_bn, SWALR
 from torch.utils.data import DataLoader, Dataset
 
 from dlshogi import cppshogi, serializers
@@ -244,6 +244,9 @@ class Model(pl.LightningModule):
         lr_scheduler_interval="epoch",
         model_filename=None,
         resume_model=None,
+        use_swa=False,
+        swa_start_epoch=10,
+        swa_lr=1e-4,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -258,6 +261,18 @@ class Model(pl.LightningModule):
             self.ema_model.requires_grad_(False)
         self.validation_step_outputs = defaultdict(list)
         self.val_lambda = val_lambda
+        self.use_swa = use_swa
+        self.swa_start_epoch = swa_start_epoch
+        self.swa_lr = swa_lr
+        self.swa_model = None
+        self.swa_scheduler = None
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)
+        if self.use_swa:
+            # Wrap the optimizer with SWA
+            self.swa_scheduler = SWALR(optimizer, swa_lr=self.swa_lr)
+        return optimizer
 
     def on_train_epoch_start(self):
         # update val_lambda
@@ -267,6 +282,9 @@ class Model(pl.LightningModule):
                 self.hparams.val_lambda * (1 - self.current_epoch / self.hparams.val_lambda_decay_epoch)
             )
             self.log("val_lambda", self.val_lambda)
+        if self.use_swa and self.current_epoch == self.swa_start_epoch:
+            # Initialize SWA model
+            self.swa_model = AveragedModel(self.model)
 
     def training_step(self, batch, batch_idx):
         features1, features2, move, result, value = batch
@@ -292,6 +310,9 @@ class Model(pl.LightningModule):
             and self.global_step % self.hparams.ema_freq == 0
         ):
             self.ema_model.update_parameters(self.model)
+        if self.use_swa and self.current_epoch >= self.swa_start_epoch:
+            # Update SWA model weights
+            self.swa_model.update_parameters(self.model)
 
     def on_train_epoch_end(self):
         if (
@@ -315,11 +336,19 @@ class Model(pl.LightningModule):
             with self.trainer.precision_plugin.train_step_context():
                 update_bn(data_loader(), self.ema_model)
             del self.ema_model.forward
+        if self.use_swa and self.current_epoch >= self.swa_start_epoch:
+            self.swa_scheduler.step()
 
     def on_fit_end(self):
         if self.hparams.model_filename:
             if self.hparams.use_ema:
                 model = self.ema_model
+            elif self.use_swa:
+                # Update batch normalization statistics for SWA model
+                dataloader = self.trainer.datamodule.train_dataloader()
+                update_bn(dataloader, self.swa_model)
+                # Replace the model with the SWA model
+                model = self.swa_model
             else:
                 model = self.model
             model_filename = self.hparams.model_filename.format(

@@ -112,6 +112,9 @@ model:
   lr_scheduler_interval: step
   model_filename: model-{epoch:03}
   resume_model: null
+  use_swa: true
+  swa_start_epoch: 3
+  swa_lr: 0.0001
 data:
   train_files:
   - /mnt/nvme1n1p2/data/concatenated.h5
