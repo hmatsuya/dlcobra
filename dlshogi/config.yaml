@@ -3,7 +3,7 @@ seed_everything: 0
 trainer:
   max_epochs: 4
   sync_batchnorm: false
-  val_check_interval: 0.5
+  val_check_interval: 10000
   precision: 16-mixed
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
@@ -73,7 +73,6 @@ trainer:
   limit_test_batches: null
   limit_predict_batches: null
   overfit_batches: 0.0
-  val_check_interval: 0.5
   check_val_every_n_epoch: 1
   num_sanity_val_steps: null
   log_every_n_steps: null
@@ -109,13 +108,9 @@ model:
   resume_model: null
 data:
   train_files:
-  - /mnt/nvme1n1p2/data/suisho150m.hcpe
-  - /mnt/nvme1n1p2/data/shogi-ai-book/floodgate_2019-2021_r3500-00*.hcpe
-  - /mnt/nvme1n1p2/data/shogi-ai-book/suisho*.hcpe
-  - /mnt/nvme1n1p2/data/shogi-ai-book/dlshogi*.hcpe
+  - /mnt/nvme1n1p2/data/concatenated.h5
   val_files:
-  - /mnt/nvme1n1p2/data/shogi-ai-book/floodgate_2019-2021_r3500-01*.hcpe
-  - /mnt/nvme1n1p2/data/shogi-ai-book/floodgate_2019-2021_r3500-02*.hcpe
+  - /mnt/nvme1n1p2/data/shogi-ai-book/floodgate_test_2017-2018_r3500_eval5000.hcpe
   batch_size: 1024
   val_batch_size: 1024
   use_average: true
