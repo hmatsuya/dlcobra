@@ -301,6 +301,8 @@ class Model(pl.LightningModule):
         self.log("train/policy_loss", loss1)
         self.log("train/result_loss", loss2)
         self.log("train/value_loss", loss3)
+        self.log("train/policy_accuracy", accuracy(y1, move))
+        self.log("train/value_accuracy", binary_accuracy(y2, result))
         return loss
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
