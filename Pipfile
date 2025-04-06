@@ -11,6 +11,7 @@ cshogi = "*"
 wandb = "*"
 h5py = "*"
 dask = "*"
+pandas = "*"
 
 [dev-packages]
 
