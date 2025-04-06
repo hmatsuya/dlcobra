@@ -26,35 +26,6 @@ def flip_sfen(sfen):
     flipped_sfen = '/'.join(flipped_lines) + ' ' + others
     return flipped_sfen
 
-def flip_sfen_square(sq):
-    if len(sq) != 2:
-        raise ValueError(f'Invalid SFEN square: {sq}')
-    if int(sq[0]) < 1 or int(sq[0]) > 9:
-        raise ValueError(f'Invalid SFEN square: {sq}')
-    if sq[1] not in "abcdefghi":
-        raise ValueError(f'Invalid SFEN square: {sq}')
-
-    flipped = str(10 - int(sq[0]))
-    flipped += chr(ord('i') - ord(sq[1]) + ord('a'))
-
-    return flipped
-
-def flip_sfen_move(move):
-    move = move.strip()
-    flipped = ''
-    if move[1] == '*':
-        flipped = move[0:2]
-    else:
-        flipped = flip_sfen_square(move[0:2])
-
-    flipped += flip_sfen_square(move[2:4])
-
-    if move[-1] == '+':
-        flipped += '+'
-
-    return flipped
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('csa_dir')
@@ -71,10 +42,6 @@ def main():
     kif_num = 0
     position_num = 0
     for filepath in csa_file_list:
-        output_path = os.path.join(args.out_dir, os.path.splitext(os.path.basename(filepath))[0] + '.hcpe')
-        if os.path.exists(output_path):
-            print(f"Output file {output_path} already exists, skipping {filepath}")
-            continue
         print(filepath)
         p = 0
         if filepath.endswith('.xz'):
@@ -100,7 +67,6 @@ def main():
 
         ply = -1
         sfen = ''
-        sfen_move = ''
         for line in input_file:
 
             # exemple:
@@ -118,18 +84,12 @@ def main():
 
                 if ply >= args.flip_ply:
                     # write out flipped position
-                    hcpes[p] = hcpes[p-1] # copy values
-
+                    hcpes[p] = hcpes[p-1]
+                    assert(sfen == flip_sfen(flip_sfen(sfen)))
                     board.set_sfen(flip_sfen(sfen))
                     board.to_hcp(hcpe['hcp'])
-
-                    flipped_sfen_move = flip_sfen_move(sfen_move.strip())
-                    move = board.move_from_usi(flipped_sfen_move)
-                    hcpe['bestMove16'] = cshogi.move16(move)
-
                     p += 1
 
-                # initialize
                 ply = -1
             else:
                 (label, data) = line.split(' ', 1)
@@ -143,7 +103,6 @@ def main():
                 move = board.move_from_usi(data.strip())
                 assert(data == cshogi.move_to_usi(move))
                 hcpe['bestMove16'] = cshogi.move16(move)
-                sfen_move = data
             elif label == 'score':
                 hcpe['eval'] = int(data)
             elif label == 'ply':
@@ -157,7 +116,7 @@ def main():
                         winner = winner ^ 1
                     hcpe['gameResult'] = winner + 1
 
-        hcpes[:p].tofile(output_path)
+        hcpes[:p].tofile(os.path.join(args.out_dir, os.path.splitext(os.path.basename(filepath))[0] + '.hcpe'))
         position_num += p
 
     print('kif_num', kif_num)
