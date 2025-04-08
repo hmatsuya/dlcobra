@@ -101,7 +101,7 @@ trainer:
   default_root_dir: null
   model_registry: null
 model:
-  network: resnet10_relu
+  network: dlshogi.network.policy_value_network_cr.PolicyValueNetwork
   val_lambda: 0.333
   val_lambda_decay_epoch: 3
   use_ema: false
