@@ -1,2 +1,2 @@
 #!/bin/sh
-pipenv run python hcpe_to_hdf5.py --shuffle /mnt/nvme1n1p2/data/concatenated.h5 /mnt/nvme1n1p2/data/suisho150m.hcpe /mnt/nvme1n1p2/data/shogi-ai-book/dlshogi*.hcpe /mnt/nvme1n1p2/data/shogi-ai-book/suisho3kai-*.hcpe /mnt/nvme1n1p2/data/shogi-ai-book/floodgate_2019-2021_r3500-*.hcpe
+pipenv run python hcpe_to_hdf5.py --shuffle /mnt/nvme1n1p2/data/concatenated.h5 /mnt/nvme1n1p2/data/suisho10Mn.hcpe /mnt/nvme1n1p2/data/suisho150m.hcpe /mnt/nvme1n1p2/data/shogi-ai-book/dlshogi*.hcpe /mnt/nvme1n1p2/data/shogi-ai-book/suisho3kai-*.hcpe /mnt/nvme1n1p2/data/shogi-ai-book/floodgate_2019-2021_r3500-*.hcpe
