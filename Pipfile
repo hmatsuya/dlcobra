@@ -9,6 +9,10 @@ lightning = "*"
 scipy = "*"
 cshogi = "*"
 wandb = "*"
+h5py = "*"
+dask = "*"
+pandas = "*"
+icecream = "*"
 
 [dev-packages]
 
