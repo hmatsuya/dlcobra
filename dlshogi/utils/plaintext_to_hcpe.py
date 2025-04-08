@@ -71,6 +71,10 @@ def main():
     kif_num = 0
     position_num = 0
     for filepath in csa_file_list:
+        output_path = os.path.join(args.out_dir, os.path.splitext(os.path.basename(filepath))[0] + '.hcpe')
+        if os.path.exists(output_path):
+            print(f"Output file {output_path} already exists, skipping {filepath}")
+            continue
         print(filepath)
         p = 0
         if filepath.endswith('.xz'):
@@ -153,7 +157,7 @@ def main():
                         winner = winner ^ 1
                     hcpe['gameResult'] = winner + 1
 
-        hcpes[:p].tofile(os.path.join(args.out_dir, os.path.splitext(os.path.basename(filepath))[0] + '.hcpe'))
+        hcpes[:p].tofile(output_path)
         position_num += p
 
     print('kif_num', kif_num)
