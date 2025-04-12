@@ -19,9 +19,9 @@ __global__ void unpack_features1_kernel(char* p1, FType* x1) {
 #pragma unroll
 	for (int i = 0; i < 81; ++i) {
 		int j = p1_offset + i;
-		// p1[j / 8] >> (j % 8)‚Å‰ºˆÊ1bit‚ÉÝ’è‚·‚é’l‚ðŽ‚Á‚Ä‚­‚é
-		// ‰ºˆÊ1bit‚Ìƒ}ƒXƒN‚ðs‚¢A•„†‚ð•‰‚É‚·‚é‚±‚Æ‚Å1‚Ìê‡1byte‚Ì‘Sbit‚ð1‚É‚·‚é
-		// 0x3c00‚Æ˜_—Ï‚ðŽæ‚é‚±‚Æ‚Åfloat16‚Ì1.0‚É‚·‚é
+		// p1[j / 8] >> (j % 8)ï¿½Å‰ï¿½ï¿½ï¿½1bitï¿½ÉÝ’è‚·ï¿½ï¿½lï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä‚ï¿½ï¿½ï¿½
+		// ï¿½ï¿½ï¿½ï¿½1bitï¿½Ìƒ}ï¿½Xï¿½Nï¿½ï¿½ï¿½sï¿½ï¿½ï¿½Aï¿½ï¿½ï¿½ï¿½ï¿½ð•‰‚É‚ï¿½ï¿½é‚±ï¿½Æ‚ï¿½1ï¿½Ìê‡1byteï¿½Ì‘Sbitï¿½ï¿½1ï¿½É‚ï¿½ï¿½ï¿½
+		// 0x3c00ï¿½Æ˜_ï¿½ï¿½ï¿½Ï‚ï¿½ï¿½ï¿½é‚±ï¿½Æ‚ï¿½float16ï¿½ï¿½1.0ï¿½É‚ï¿½ï¿½ï¿½
 		x1[x1_offset + i] = (-(FType)((p1[j >> 3] >> (j & 7)) & 1)) & one;
 	}
 }
@@ -29,8 +29,16 @@ __global__ void unpack_features1_kernel(char* p1, FType* x1) {
 __global__ void unpack_features2_kernel(char* p2, FType* x2) {
 	int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
-	int j = sizeof(packed_features2_t) * 8 * blockIdx.x + threadIdx.x;
-	FType v = (-(FType)((p2[j >> 3] >> (j & 7)) & 1)) & one;
+	// Each feature is 4 bits, packed two per byte
+	unsigned char byte = (unsigned char)p2[tid >> 1];
+	int value = (tid & 1) == 0 ? (byte & 0x0F) : ((byte >> 4) & 0x0F);
+
+	FType v;
+#ifdef FP16
+	v = __float2half(logf((float)value + 1.0f));
+#else
+	v = logf((float)value + 1.0f);
+#endif
 
 	int x2_offset = tid * 81;
 #pragma unroll

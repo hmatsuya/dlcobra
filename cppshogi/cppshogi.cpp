@@ -1,5 +1,6 @@
 ﻿#include <numeric>
 #include <algorithm>
+#include <cmath> // For std::log2, std::ceil
 
 #include "cppshogi.h"
 
@@ -15,23 +16,29 @@ inline void set_features1(packed_features1_t packed_features1, const Color c, co
 
 inline void set_features2(features2_t features2, const Color c, const int f2idx, const u32 num)
 {
-	std::fill_n(features2[MAX_PIECES_IN_HAND_SUM * (int)c + f2idx], (int)SquareNum * num, _one);
+	const float log_count = std::log(num + 1.0f);
+	const int base_idx = LOG_MAX_PIECES_IN_HAND_SUM * (int)c + f2idx;
+	if (log_count > 0) // Only fill if count > 0
+		std::fill_n(features2[base_idx], (int)SquareNum, log_count);
 }
 inline void set_features2(packed_features2_t packed_features2, const Color c, const int f2idx, const u32 num)
 {
-	for (u32 i = 0; i < num; ++i) {
-		const int idx = MAX_PIECES_IN_HAND_SUM * (int)c + f2idx + i;
-		packed_features2[idx >> 3] |= (1 << (idx & 7));
-	}
+	const int idx = LOG_MAX_PIECES_IN_HAND_SUM * (int)c + f2idx;
+	packed_features2[f2idx >> 1] |= (num & 15 << (f2idx & 1 * 4));
 }
 
+// Set single features (like check, nyugyoku flags)
 inline void set_features2(features2_t features2, const int f2idx)
 {
 	std::fill_n(features2[f2idx], SquareNum, _one);
 }
-inline void set_features2(packed_features2_t packed_features2, const int f2idx)
+inline void set_features2(features2_t features2, const int f2idx, const int value)
 {
-	packed_features2[f2idx >> 3] |= (1 << (f2idx & 7));
+	std::fill_n(features2[f2idx], SquareNum, std::log((float)value + 1.0f));
+}
+inline void set_features2(packed_features2_t packed_features2, const int f2idx, const int value)
+{
+	packed_features2[f2idx >> 1] |= (value & 0x0F << (f2idx & 1 * 4));
 }
 
 // make input features
@@ -105,20 +112,15 @@ inline void make_input_features(const Position& position, T1 features1, T2 featu
 
 		// 持ち駒
 		const Hand hand = position.hand(c);
-		const u32 numHPawn = hand.numOf(HPawn);
-		set_features2(features2, c2, 0, std::min(numHPawn, (u32)MAX_HPAWN_NUM));
-		const u32 numHLance = hand.numOf(HLance);
-		set_features2(features2, c2, MAX_HPAWN_NUM, numHLance);
-		const u32 numHKnight = hand.numOf(HKnight);
-		set_features2(features2, c2, MAX_HPAWN_NUM + MAX_HLANCE_NUM, numHKnight);
-		const u32 numHSilver = hand.numOf(HSilver);
-		set_features2(features2, c2, MAX_HPAWN_NUM + MAX_HLANCE_NUM + MAX_HKNIGHT_NUM, numHSilver);
-		const u32 numHGold = hand.numOf(HGold);
-		set_features2(features2, c2, MAX_HPAWN_NUM + MAX_HLANCE_NUM + MAX_HKNIGHT_NUM + MAX_HSILVER_NUM, numHGold);
-		const u32 numHBishop = hand.numOf(HBishop);
-		set_features2(features2, c2, MAX_HPAWN_NUM + MAX_HLANCE_NUM + MAX_HKNIGHT_NUM + MAX_HSILVER_NUM + MAX_HGOLD_NUM, numHBishop);
-		const u32 numHRook = hand.numOf(HRook);
-		set_features2(features2, c2, MAX_HPAWN_NUM + MAX_HLANCE_NUM + MAX_HKNIGHT_NUM + MAX_HSILVER_NUM + MAX_HGOLD_NUM + MAX_HBISHOP_NUM, numHRook);
+		// Use log-count features
+		set_features2(features2, c2, OFFSET_LOG_HPAWN,   hand.numOf(HPawn));
+		set_features2(features2, c2, OFFSET_LOG_HLANCE,  hand.numOf(HLance));
+		set_features2(features2, c2, OFFSET_LOG_HKNIGHT, hand.numOf(HKnight));
+		set_features2(features2, c2, OFFSET_LOG_HSILVER, hand.numOf(HSilver));
+		set_features2(features2, c2, OFFSET_LOG_HGOLD,   hand.numOf(HGold));
+		set_features2(features2, c2, OFFSET_LOG_HBISHOP, hand.numOf(HBishop));
+		set_features2(features2, c2, OFFSET_LOG_HROOK,   hand.numOf(HRook));
+		// Total hand features per color = 7
 
 #ifdef NYUGYOKU_FEATURES
 		// 入玉宣言
@@ -128,34 +130,37 @@ inline void make_input_features(const Position& position, T1 features1, T2 featu
 		// 玉が敵陣三段目以内に入っている
 		int kingCount = 0;
 		if (position.bbOf(King, c).andIsAny(opponentsField)) {
-			set_features2(features2, MAX_FEATURES2_HAND_NUM + 1 + (int)c2 * MAX_FEATURES2_NYUGYOKU_NUM);
+			// Nyugyoku flag index (offset 0 within nyugyoku block for color c2)
+			set_features2(features2, MAX_FEATURES2_HAND_NUM + 1 + (int)c2 * MAX_FEATURES2_NYUGYOKU_NUM + 0);
 			kingCount = 1;
 		}
 
 		// 敵陣三段目以内の駒(10枚までの残り枚数)
 		const int ownPiecesCount = (position.bbOf(c) & opponentsField).popCount() - kingCount;
-		const int restOppFieldNum = 10 - ownPiecesCount;
-		if (restOppFieldNum < MAX_NYUGYOKU_OPP_FIELD) {
-			set_features2(features2, MAX_FEATURES2_HAND_NUM + 1 + (int)c2 * MAX_FEATURES2_NYUGYOKU_NUM + 1 + std::max(0, restOppFieldNum));
+		const int restOppFieldNum = MAX_NYUGYOKU_OPP_FIELD - ownPiecesCount; // Calculate remaining count needed (0 to MAX-1)
+		if (restOppFieldNum < MAX_NYUGYOKU_OPP_FIELD && restOppFieldNum >= 0) { // Check range
+			// Nyugyoku opponent field count features start at offset 1
+			set_features2(features2, MAX_FEATURES2_HAND_NUM + 1 + (int)c2 * MAX_FEATURES2_NYUGYOKU_NUM + 1 + restOppFieldNum);
 		}
 
 		// 点数(先手28点、後手27点までの残り枚数)
 		const int ownBigPiecesCount = (position.bbOf(Rook, Dragon, Bishop, Horse) & opponentsField & position.bbOf(c)).popCount();
 		const int ownSmallPiecesCount = ownPiecesCount - ownBigPiecesCount;
 		const int val = ownSmallPiecesCount
-			+ numHPawn + numHLance + numHKnight
-			+ numHSilver + numHGold
-			+ (ownBigPiecesCount + numHBishop + numHRook) * 5;
-		const int restPoint = (c == Black ? 28 : 27) - val;
-		if (restPoint < MAX_NYUGYOKU_SCORE) {
-			set_features2(features2, MAX_FEATURES2_HAND_NUM + 1 + (int)c2 * MAX_FEATURES2_NYUGYOKU_NUM + 1 + MAX_NYUGYOKU_OPP_FIELD + std::max(0, restPoint));
+			+ hand.numOf(HPawn) + hand.numOf(HLance) + hand.numOf(HKnight)
+			+ hand.numOf(HSilver) + hand.numOf(HGold)
+			+ (ownBigPiecesCount + hand.numOf(HBishop) + hand.numOf(HRook)) * 5;
+		const int restPoint = (c == Black ? 28 : 27) - val; // Calculate remaining points needed (0 to MAX-1)
+		if (restPoint < MAX_NYUGYOKU_SCORE && restPoint >= 0) { // Check range
+			// Nyugyoku score features start after the opponent field count features
+			set_features2(features2, MAX_FEATURES2_HAND_NUM + 1 + (int)c2 * MAX_FEATURES2_NYUGYOKU_NUM + 1 + MAX_NYUGYOKU_OPP_FIELD + restPoint);
 		}
 #endif
-    }
+	}
 
-	// is check
+	// is check (index = MAX_FEATURES2_HAND_NUM)
 	if (position.inCheck()) {
-		set_features2(features2, MAX_FEATURES2_HAND_NUM);
+		set_features2(features2, MAX_FEATURES2_HAND_NUM, 1);
 	}
 }
 

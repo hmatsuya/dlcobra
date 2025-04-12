@@ -24,8 +24,39 @@ constexpr u32 MAX_PIECES_IN_HAND[] = {
 	MAX_HBISHOP_NUM, // BISHOP
 	MAX_HROOK_NUM, // ROOK
 };
+
+// Log-count based features for hand pieces
+constexpr int LOG_MAX_HPAWN_NUM   = 1;
+constexpr int LOG_MAX_HLANCE_NUM  = 1;
+constexpr int LOG_MAX_HKNIGHT_NUM = 1;
+constexpr int LOG_MAX_HSILVER_NUM = 1;
+constexpr int LOG_MAX_HGOLD_NUM   = 1;
+constexpr int LOG_MAX_HBISHOP_NUM = 1;
+constexpr int LOG_MAX_HROOK_NUM   = 1;
+
+constexpr u32 LOG_MAX_PIECES_IN_HAND[] = {
+	LOG_MAX_HPAWN_NUM,   // PAWN
+	LOG_MAX_HLANCE_NUM,  // LANCE
+	LOG_MAX_HKNIGHT_NUM, // KNIGHT
+	LOG_MAX_HSILVER_NUM, // SILVER
+	LOG_MAX_HGOLD_NUM,   // GOLD
+	LOG_MAX_HBISHOP_NUM, // BISHOP
+	LOG_MAX_HROOK_NUM,   // ROOK
+};
+
 constexpr u32 MAX_PIECES_IN_HAND_SUM = MAX_HPAWN_NUM + MAX_HLANCE_NUM + MAX_HKNIGHT_NUM + MAX_HSILVER_NUM + MAX_HGOLD_NUM + MAX_HBISHOP_NUM + MAX_HROOK_NUM;
-constexpr u32 MAX_FEATURES2_HAND_NUM = (int)ColorNum * MAX_PIECES_IN_HAND_SUM;
+constexpr u32 LOG_MAX_PIECES_IN_HAND_SUM = LOG_MAX_HPAWN_NUM + LOG_MAX_HLANCE_NUM + LOG_MAX_HKNIGHT_NUM + LOG_MAX_HSILVER_NUM + LOG_MAX_HGOLD_NUM + LOG_MAX_HBISHOP_NUM + LOG_MAX_HROOK_NUM; // 4+3+3+3+3+2+2 = 20
+constexpr u32 MAX_FEATURES2_HAND_NUM = (int)ColorNum * LOG_MAX_PIECES_IN_HAND_SUM; // 2 * 20 = 40
+
+// Offsets for log-count hand features within features2
+constexpr u32 OFFSET_LOG_HPAWN   = 0;
+constexpr u32 OFFSET_LOG_HLANCE  = 1;
+constexpr u32 OFFSET_LOG_HKNIGHT = 2;
+constexpr u32 OFFSET_LOG_HSILVER = 3;
+constexpr u32 OFFSET_LOG_HGOLD   = 4;
+constexpr u32 OFFSET_LOG_HBISHOP = 5;
+constexpr u32 OFFSET_LOG_HROOK   = 6;
+// Check feature index = MAX_FEATURES2_HAND_NUM (40)
 
 #ifdef NYUGYOKU_FEATURES
 constexpr u32 MAX_NYUGYOKU_OPP_FIELD = 10; // 敵陣三段目以内の駒(10枚までの残り枚数)
@@ -53,7 +84,7 @@ enum MOVE_DIRECTION {
 constexpr int MAX_MOVE_LABEL_NUM = MOVE_DIRECTION_NUM + HandPieceNum;
 
 typedef char packed_features1_t[((size_t)ColorNum * MAX_FEATURES1_NUM * (size_t)SquareNum + 7) / 8];
-typedef char packed_features2_t[((size_t)MAX_FEATURES2_NUM + 7) / 8];
+typedef char packed_features2_t[((size_t)MAX_FEATURES2_NUM + 7) / 2];
 
 typedef DType features1_t[ColorNum][MAX_FEATURES1_NUM][SquareNum];
 typedef DType features2_t[MAX_FEATURES2_NUM][SquareNum];
