@@ -158,10 +158,7 @@ inline void make_input_features(const Position& position, T1 features1, T2 featu
 #endif
 	}
 
-	// is check (index = MAX_FEATURES2_HAND_NUM)
-	if (position.inCheck()) {
-		set_features2(features2, MAX_FEATURES2_HAND_NUM, 1);
-	}
+	// in-check feature removed
 }
 
 void make_input_features(const Position& position, features1_t features1, features2_t features2) {
