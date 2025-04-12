@@ -68,20 +68,6 @@ inline void make_input_features(const Position& position, T1 features1, T2 featu
 		// 駒の配置
 		set_features1(features1, c, pt - 1, sq);
 
-		FOREACH_BB(attacks, Square to, {
-			// 後手の場合、盤面を180度回転
-			if (turn == White) to = SQ99 - to;
-
-			// 駒の利き
-			set_features1(features1, c, PIECETYPE_NUM + pt - 1, to);
-
-			// 利き数
-			auto& num = attack_num[c][to];
-			if (num < MAX_ATTACK_NUM) {
-				set_features1(features1, c, PIECETYPE_NUM + PIECETYPE_NUM + num, to);
-				num++;
-			}
-		});
 	});
 
 	for (Color c = Black; c < ColorNum; ++c) {
@@ -98,16 +84,6 @@ inline void make_input_features(const Position& position, T1 features1, T2 featu
 			// 駒の配置
 			set_features1(features1, c, Pawn - 1, sq);
 
-			// 駒の利き
-			const Square to = sq + pawnDelta; // 1マス先
-			set_features1(features1, c, PIECETYPE_NUM + Pawn - 1, to);
-
-			// 利き数
-			auto& num = attack_num[c][to];
-			if (num < MAX_ATTACK_NUM) {
-				set_features1(features1, c, PIECETYPE_NUM + PIECETYPE_NUM + num, to);
-				num++;
-			}
 		});
 
 		// 持ち駒
