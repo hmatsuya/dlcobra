@@ -88,7 +88,7 @@ class PolicyValueNetwork(torch.nn. Module):
         num_channels=192,
         args=None,
         dropout=0.05,
-        num_middle_blocks=15,
+        num_middle_blocks=30,
     ):
         super(PolicyValueNetwork, self).__init__()
 
@@ -105,33 +105,22 @@ class PolicyValueNetwork(torch.nn. Module):
             *[ResnetBlock(num_channels,num_channels) for _ in range(num_middle_blocks)]
         )
 
-        # Flatten after backbone
-        self.flatten = torch.nn.Flatten(start_dim=1)
-
-        # Two DropoutBlocks as in CRNet
-        self.dropout_blocks = torch.nn.Sequential(
-            DropoutBlock(num_channels * args['M'] * args['N'], H[0], dropout=dropout),
-            DropoutBlock(H[0], H[1], dropout=dropout)
-        )
-
         self.model = torch.nn.Sequential(
             self.middle_blocks,
-            self.flatten,
-            self.dropout_blocks,
         )
 
-        # Policy head: FC -> ReLU -> FC (outputting move logits)
         self.my_policy_head = torch.nn.Sequential(
-            torch.nn.Linear(H[1], H[1]),
-            torch.nn.ReLU(),
-            torch.nn.Linear(H[1], MAX_MOVE_LABEL_NUM * args['M'] * args['N'])
+            torch.nn.Conv2d(num_channels, MAX_MOVE_LABEL_NUM, kernel_size=1, stride=1, padding=0),
+            torch.nn.Flatten(start_dim=1),
         )
 
-        # Value head: FC -> ReLU -> FC (outputting scalar, no activation)
         self.value_head = torch.nn.Sequential(
-            torch.nn.Linear(H[1], H[1]),
+            torch.nn.Conv2d(num_channels, H[0], kernel_size=1, stride=1, padding=0),
+            torch.nn.BatchNorm2d(H[0]),
             torch.nn.ReLU(),
-            torch.nn.Linear(H[1], 1)
+            torch.nn.Flatten(start_dim=1),
+            DropoutBlock(H[0] * args['M'] * args['N'], H[1], dropout=dropout),
+            torch.nn.Linear(H[1], 1),
         )
 
 
