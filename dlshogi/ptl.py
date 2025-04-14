@@ -18,6 +18,8 @@ from dlshogi.data_loader import DataLoader as HcpeDataLoader
 from dlshogi.data_loader import Hcpe3DataLoader, Hdf5DataLoader
 from dlshogi.network.policy_value_network import policy_value_network
 
+logger = logging.getLogger(__name__)
+
 
 class HcpeDataset(Dataset):
     def __init__(self, files):
@@ -348,9 +350,13 @@ class Model(pl.LightningModule):
             elif self.use_swa:
                 # Update batch normalization statistics for SWA model
                 dataloader = self.trainer.datamodule.train_dataloader()
-                update_bn(dataloader, self.swa_model)
-                # Replace the model with the SWA model
-                model = self.swa_model
+                if self.swa_model is not None:
+                    update_bn(dataloader, self.swa_model)
+                    # Replace the model with the SWA model
+                    model = self.swa_model
+                else:
+                    logger.warning("SWA is enabled but self.swa_model is None. Skipping update_bn and saving base model instead.")
+                    model = self.model
             else:
                 model = self.model
             model_filename = self.hparams.model_filename.format(
