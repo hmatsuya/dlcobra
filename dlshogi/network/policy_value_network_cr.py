@@ -67,7 +67,7 @@ class DropoutBlock(torch.nn.Module):
 class InitialBlock(torch.nn.Module):
     def __init__(self, out_channels):
         super(InitialBlock, self).__init__()
-        self.conv1a = torch.nn.Conv2d(FEATURES1_NUM, out_channels, 3, stride=1, padding=1, bias=False)
+        self.conv1a = torch.nn.Conv2d(FEATURES1_NUM, out_channels, 5, stride=1, padding=2, bias=False)
         self.conv1b = torch.nn.Conv2d(FEATURES1_NUM, out_channels, 1, stride=1, padding=0, bias=False)
         self.conb2  = torch.nn.Conv2d(FEATURES2_NUM, out_channels, 1, stride=1, padding=0, bias=False)
         self.norm = torch.nn.BatchNorm2d(out_channels)
@@ -85,6 +85,7 @@ class PolicyValueNetwork(torch.nn. Module):
     def __init__(
         self,
         H=[32, 128],
+        num_initial_channels=96,
         num_channels=192,
         args=None,
         dropout=0.05,
@@ -99,10 +100,11 @@ class PolicyValueNetwork(torch.nn. Module):
             }
         self.args = args
 
-        self.initial_block = InitialBlock(num_channels)
+        self.initial_block = InitialBlock(num_initial_channels)
 
         self.middle_blocks = torch.nn.Sequential(
-            *[ResnetBlock(num_channels,num_channels) for _ in range(num_middle_blocks)]
+            ResnetBlock(num_initial_channels,num_channels),
+            *[ResnetBlock(num_channels,num_channels) for _ in range(num_middle_blocks-1)]
         )
 
         self.model = torch.nn.Sequential(
