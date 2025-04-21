@@ -85,10 +85,10 @@ class PolicyValueNetwork(torch.nn. Module):
     def __init__(
         self,
         H=[32, 128],
-        num_channels=192,
+        num_channels=128,
         args=None,
         dropout=0.05,
-        num_middle_blocks=30,
+        num_middle_blocks=50,
     ):
         super(PolicyValueNetwork, self).__init__()
 
