@@ -68,11 +68,6 @@ trainer:
       patience: 100000
       mode: min
       verbose: true
-  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-    init_args:
-      monitor: val/loss
-      mode: min
-      save_top_k: 5
   fast_dev_run: false
   max_epochs: 4
   min_epochs: null
