@@ -65,7 +65,7 @@ trainer:
   - class_path: lightning.pytorch.callbacks.EarlyStopping
     init_args:
       monitor: val/loss
-      patience: 1000
+      patience: 100000
       mode: min
       verbose: true
   - class_path: lightning.pytorch.callbacks.ModelCheckpoint
@@ -135,7 +135,7 @@ data:
 optimizer:
   class_path: torch.optim.AdamW
   init_args:
-    lr: 0.01
+    lr: 0.003
     betas:
     - 0.9
     - 0.999
@@ -150,7 +150,7 @@ optimizer:
 lr_scheduler:
   class_path: dlshogi.lr_scheduler.CosineLRScheduler
   init_args:
-    t_initial: 100000
+    t_initial: 300000
     lr_min: 1.0e-05
     cycle_mul: 2
     cycle_decay: 0.5
