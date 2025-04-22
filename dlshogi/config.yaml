@@ -55,7 +55,7 @@ trainer:
       every_n_train_steps: null
       train_time_interval: null
       every_n_epochs: null
-      save_on_train_epoch_end: true
+      save_on_train_epoch_end: false
       enable_version_counter: true
   - class_path: lightning.pytorch.callbacks.LearningRateMonitor
     init_args:
