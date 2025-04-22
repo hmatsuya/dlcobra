@@ -65,7 +65,7 @@ trainer:
   - class_path: lightning.pytorch.callbacks.EarlyStopping
     init_args:
       monitor: val/loss
-      patience: 1000
+      patience: 100000
       mode: min
       verbose: true
   fast_dev_run: false
@@ -149,7 +149,7 @@ optimizer:
 lr_scheduler:
   class_path: dlshogi.lr_scheduler.CosineLRScheduler
   init_args:
-    t_initial: 100000
+    t_initial: 300000
     lr_min: 1.0e-05
     cycle_mul: 2
     cycle_decay: 0.5
