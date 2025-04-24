@@ -262,3 +262,5 @@ wandb/
 model/
 *.pgn
 .ipynb_checkpoints
+
+[Dd]ownload/
