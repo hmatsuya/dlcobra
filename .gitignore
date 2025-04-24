@@ -262,4 +262,5 @@ wandb/
 model/
 *.pgn
 .ipynb_checkpoints
-dlshogi/download/
+
+[Dd]ownload/

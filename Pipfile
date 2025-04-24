@@ -8,11 +8,13 @@ torch = "*"
 lightning = "*"
 scipy = "*"
 cshogi = "*"
-wandb = "*"
 h5py = "*"
 dask = "*"
 pandas = "*"
 icecream = "*"
+onnx = "*"
+pyyaml = "*"
+wandb = "*"
 
 [dev-packages]
 

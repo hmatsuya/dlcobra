@@ -269,6 +269,9 @@ class Model(pl.LightningModule):
         self.swa_model = None
         self.swa_scheduler = None
 
+    def forward(self, x1, x2):
+        return self.model(x1, x2)
+
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)
         if self.use_swa:
