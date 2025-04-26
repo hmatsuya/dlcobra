@@ -4,7 +4,7 @@ CFLAGS = -std=c++17 -Wextra -Ofast -MMD -MP -fopenmp -DPV_MATE_SEARCH -DWIN_TYPE
 ifneq ($(NYUGYOKU_FEATURES),)
 CFLAGS += -DNYUGYOKU_FEATURES
 endif
-LDFLAGS = -lpthread -lnvinfer -lnvparsers -lnvonnxparser -lcudart -flto
+LDFLAGS = -lpthread -lnvinfer -lnvonnxparser -lcudart -flto # Removed -lnvparsers
 INCLUDE = -I../usi -I../cppshogi -I/usr/local/cuda/include
 LIB = -L/usr/local/cuda/lib64
 
