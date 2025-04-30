@@ -83,7 +83,7 @@ enum MOVE_DIRECTION {
 constexpr int MAX_MOVE_LABEL_NUM = MOVE_DIRECTION_NUM + HandPieceNum;
 
 typedef char packed_features1_t[((size_t)ColorNum * MAX_FEATURES1_NUM * (size_t)SquareNum + 7) / 8];
-typedef char packed_features2_t[((size_t)MAX_FEATURES2_NUM + 7) / 2];
+typedef char packed_features2_t[((size_t)MAX_FEATURES2_NUM + 1) / 2];
 
 typedef DType features1_t[ColorNum][MAX_FEATURES1_NUM][SquareNum];
 typedef DType features2_t[MAX_FEATURES2_NUM][SquareNum];

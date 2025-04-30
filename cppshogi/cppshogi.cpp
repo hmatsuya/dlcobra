@@ -23,8 +23,12 @@ inline void set_features2(features2_t features2, const Color c, const int f2idx,
 }
 inline void set_features2(packed_features2_t packed_features2, const Color c, const int f2idx, const u32 num)
 {
-	const int idx = LOG_MAX_PIECES_IN_HAND_SUM * (int)c + f2idx;
-	packed_features2[f2idx >> 1] |= (num & 15 << (f2idx & 1 * 4));
+    const int idx = LOG_MAX_PIECES_IN_HAND_SUM * (int)c + f2idx;
+    const int packed_idx = idx >> 1;
+    const int shift = (idx & 1) * 4;
+	u32 truncated_num = std::min(num, (u32)0x0F);
+    packed_features2[packed_idx] &= ~(0x0F << shift);           // Clear the 4 bits
+    packed_features2[packed_idx] |= ((truncated_num & 0x0F) << shift);    // Set the new value
 }
 
 // Set single features (like check, nyugyoku flags)
@@ -38,7 +42,11 @@ inline void set_features2(features2_t features2, const int f2idx, const int valu
 }
 inline void set_features2(packed_features2_t packed_features2, const int f2idx, const int value)
 {
-	packed_features2[f2idx >> 1] |= (value & 0x0F << (f2idx & 1 * 4));
+    const int packed_idx = f2idx >> 1;
+    const int shift = (f2idx & 1) * 4;
+	int truncated_value = std::min(value, (int)0x0F);
+    packed_features2[packed_idx] &= ~(0x0F << shift);           // Clear the 4 bits
+    packed_features2[packed_idx] |= ((truncated_value & 0x0F) << shift);  // Set the new value
 }
 
 // make input features
