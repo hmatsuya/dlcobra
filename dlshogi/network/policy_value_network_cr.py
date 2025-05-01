@@ -84,11 +84,11 @@ class InitialBlock(torch.nn.Module):
 class PolicyValueNetwork(torch.nn. Module):
     def __init__(
         self,
-        H=[32, 128],
-        num_channels=128,
+        H=[32, 256],
+        num_channels=192,
         args=None,
         dropout=0.05,
-        num_middle_blocks=50,
+        num_middle_blocks=15,
     ):
         super(PolicyValueNetwork, self).__init__()
 
