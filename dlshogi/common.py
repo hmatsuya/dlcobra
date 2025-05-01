@@ -26,7 +26,7 @@ PIECETYPE_NUM = 14 # 駒の種類
 MAX_ATTACK_NUM = 3 # 利き数の最大値
 MAX_FEATURES2_NYUGYOKU_NUM = get_max_features2_nyugyoku_num() # 入玉特徴量の数
 FEATURES1_NUM = 2 * PIECETYPE_NUM  # Only piece placement features (no attack or attack_num)
-FEATURES2_NUM = 2 * MAX_PIECES_IN_HAND_SUM + 2 * MAX_FEATURES2_NYUGYOKU_NUM
+FEATURES2_NUM = 2 * len(MAX_PIECES_IN_HAND_SUM) + 2 * MAX_FEATURES2_NYUGYOKU_NUM
 
 HuffmanCodedPosAndEval = np.dtype([
     ('hcp', np.uint8, 32),
