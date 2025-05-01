@@ -5,8 +5,8 @@ ifneq ($(NYUGYOKU_FEATURES),)
 CFLAGS += -DNYUGYOKU_FEATURES
 endif
 LDFLAGS = -lpthread -lonnxruntime -flto
-INCLUDE = -I../usi -I../usi_onnxruntime -I../cppshogi -I/work/onnxruntime-linux-x64-1.14.1/include
-LIB = -L/work/onnxruntime-linux-x64-1.14.1/lib
+INCLUDE = -I../usi -I../usi_onnxruntime -I../cppshogi -I/opt/onnxruntime-linux-x64-gpu-1.14.1/include
+LIB = -L/opt/onnxruntime-linux-x64-gpu-1.14.1/lib
 
 target = bin/dlshogi_onnxruntime
 sources = nn_onnxruntime.cpp
