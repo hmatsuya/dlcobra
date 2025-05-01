@@ -26,33 +26,7 @@ __global__ void unpack_features1_kernel(char* p1, FType* x1) {
 	}
 }
 
-__global__ void unpack_features2_kernel(char* p2, FType* x2) {
-	int tid = blockIdx.x * blockDim.x + threadIdx.x;
-
-	// Each feature is 4 bits, packed two per byte
-	unsigned char byte = (unsigned char)p2[tid >> 1];
-	int value = (tid & 1) == 0 ? (byte & 0x0F) : ((byte >> 4) & 0x0F);
-
-	FType v;
-#ifdef FP16
-	v = __float2half(logf((float)value + 1.0f));
-#else
-	v = logf((float)value + 1.0f);
-#endif
-
-	int x2_offset = tid * 81;
-#pragma unroll
-	for (int i = 0; i < 81; ++i) {
-		x2[x2_offset + i] = v;
-	}
-}
-
 void unpack_features1(const int batch_size, packed_features1_t* p1, features1_t* x1, cudaStream_t stream)
 {
 	unpack_features1_kernel<<<batch_size, features1_size, 0, stream>>>((char*)p1, (FType*)x1);
-}
-
-void unpack_features2(const int batch_size, packed_features2_t* p2, features2_t* x2, cudaStream_t stream)
-{
-	unpack_features2_kernel<<<batch_size, features2_size, 0, stream>>> ((char*)p2, (FType*)x2);
 }

@@ -34,7 +34,6 @@ NNTensorRT::NNTensorRT(const char* filename, const int gpu_id, const int max_bat
 {
 	// Create host and device buffers
 	checkCudaErrors(cudaMalloc((void**)&p1_dev, sizeof(packed_features1_t) * max_batch_size));
-	checkCudaErrors(cudaMalloc((void**)&p2_dev, sizeof(packed_features2_t) * max_batch_size));
 	checkCudaErrors(cudaMalloc((void**)&x1_dev, sizeof(features1_t) * max_batch_size));
 	checkCudaErrors(cudaMalloc((void**)&x2_dev, sizeof(features2_t) * max_batch_size));
 	checkCudaErrors(cudaMalloc((void**)&y1_dev, MAX_MOVE_LABEL_NUM * (size_t)SquareNum * max_batch_size * sizeof(DType)));
@@ -48,7 +47,6 @@ NNTensorRT::NNTensorRT(const char* filename, const int gpu_id, const int max_bat
 NNTensorRT::~NNTensorRT()
 {
 	checkCudaErrors(cudaFree(p1_dev));
-	checkCudaErrors(cudaFree(p2_dev));
 	checkCudaErrors(cudaFree(x1_dev));
 	checkCudaErrors(cudaFree(x2_dev));
 	checkCudaErrors(cudaFree(y1_dev));
@@ -86,7 +84,10 @@ void NNTensorRT::build(const std::string& onnx_filename)
 	auto parsed = parser->parseFromFile(onnx_filename.c_str(), (int)nvinfer1::ILogger::Severity::kWARNING);
 	if (!parsed)
 	{
-		throw std::runtime_error("parseFromFile");
+		for (int i = 0; i < parser->getNbErrors(); ++i) {
+			std::cerr << "ONNX Parser Error: " << parser->getError(i)->desc() << std::endl;
+		}
+		throw std::runtime_error("parseFromFile failed: " + onnx_filename);
 	}
 
 	// builder->setMaxBatchSize(max_batch_size); // Deprecated for explicit batch
@@ -193,12 +194,19 @@ void NNTensorRT::load_model(const char* filename)
 		seriarizedFile.read(blob.get(), modelSize);
 		auto runtime = InferUniquePtr<nvinfer1::IRuntime>(nvinfer1::createInferRuntime(gLogger));
 		engine = InferUniquePtr<nvinfer1::ICudaEngine>(runtime->deserializeCudaEngine(blob.get(), modelSize));
+		if (!engine) {
+			throw std::runtime_error("Failed to deserialize TensorRT engine from file: " + serialized_filename);
+		}
 	}
 	else
 	{
 
 		// build
 		build(filename);
+
+		if (!engine) {
+			throw std::runtime_error("Failed to build TensorRT engine from ONNX: " + std::string(filename));
+		}
 
 		// serializing a model
 		auto serializedEngine = InferUniquePtr<nvinfer1::IHostMemory>(engine->serialize());
@@ -217,7 +225,6 @@ void NNTensorRT::load_model(const char* filename)
 			throw std::runtime_error("Cannot open engine file");
 		}
 	}
-
 	context = InferUniquePtr<nvinfer1::IExecutionContext>(engine->createExecutionContext());
 	if (!context)
 	{
@@ -230,23 +237,23 @@ void NNTensorRT::load_model(const char* filename)
 	inputDims2 = engine->getTensorShape("input2");
 }
 
-void NNTensorRT::forward(const int batch_size, packed_features1_t* p1, packed_features2_t* p2, DType* y1, DType* y2)
+void NNTensorRT::forward(const int batch_size, packed_features1_t* p1, features2_t* p2, DType* y1, DType* y2)
 {
-	inputDims1.d[0] = batch_size;
-	inputDims2.d[0] = batch_size;
-	// Set input shapes by name before running inference
-	// Assuming tensor names are "input1" and "input2"
-	context->setInputShape("input1", inputDims1);
-	context->setInputShape("input2", inputDims2);
+    inputDims1.d[0] = batch_size;
+    inputDims2.d[0] = batch_size;
+    // Set input shapes by name before running inference
+    context->setInputShape("input1", inputDims1);
+    context->setInputShape("input2", inputDims2);
 
-	checkCudaErrors(cudaMemcpyAsync(p1_dev, p1, sizeof(packed_features1_t) * batch_size, cudaMemcpyHostToDevice, cudaStreamPerThread));
-	checkCudaErrors(cudaMemcpyAsync(p2_dev, p2, sizeof(packed_features2_t) * batch_size, cudaMemcpyHostToDevice, cudaStreamPerThread));
-	unpack_features1(batch_size, p1_dev, x1_dev, cudaStreamPerThread);
-	unpack_features2(batch_size, p2_dev, x2_dev, cudaStreamPerThread);
-	// const bool status = context->enqueue(batch_size, inputBindings.data(), cudaStreamPerThread, nullptr); // Deprecated
-	const bool status = context->enqueueV3(cudaStreamPerThread); // Use enqueueV3, bindings are implicitly known by context
-	assert(status);
-	checkCudaErrors(cudaMemcpyAsync(y1, y1_dev, sizeof(DType) * MAX_MOVE_LABEL_NUM * (size_t)SquareNum * batch_size , cudaMemcpyDeviceToHost, cudaStreamPerThread));
-	checkCudaErrors(cudaMemcpyAsync(y2, y2_dev, sizeof(DType) * batch_size, cudaMemcpyDeviceToHost, cudaStreamPerThread));
-	checkCudaErrors(cudaStreamSynchronize(cudaStreamPerThread));
+    checkCudaErrors(cudaMemcpyAsync(p1_dev, p1, sizeof(packed_features1_t) * batch_size, cudaMemcpyHostToDevice, cudaStreamPerThread));
+    unpack_features1(batch_size, p1_dev, x1_dev, cudaStreamPerThread);
+    // Directly copy already-unpacked features2 to x2_dev
+    checkCudaErrors(cudaMemcpyAsync(x2_dev, p2, sizeof(features2_t) * batch_size, cudaMemcpyHostToDevice, cudaStreamPerThread));
+
+    const bool status = context->enqueueV3(cudaStreamPerThread);
+    assert(status);
+
+    checkCudaErrors(cudaMemcpyAsync(y1, y1_dev, sizeof(DType) * MAX_MOVE_LABEL_NUM * (size_t)SquareNum * batch_size, cudaMemcpyDeviceToHost, cudaStreamPerThread));
+    checkCudaErrors(cudaMemcpyAsync(y2, y2_dev, sizeof(DType) * batch_size, cudaMemcpyDeviceToHost, cudaStreamPerThread));
+    checkCudaErrors(cudaStreamSynchronize(cudaStreamPerThread));
 }

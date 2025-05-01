@@ -50,7 +50,7 @@ typedef features1_t Features1;
 typedef features2_t Features2;
 #else
 typedef packed_features1_t Features1;
-typedef packed_features2_t Features2;
+typedef features2_t Features2;
 #endif
 
 #ifdef MULTI_PONDER
@@ -329,7 +329,7 @@ public:
 		y2 = new DType[policy_value_batch_maxsize];
 #else
 		checkCudaErrors(cudaHostAlloc((void**)&features1, sizeof(packed_features1_t) * policy_value_batch_maxsize, cudaHostAllocPortable));
-		checkCudaErrors(cudaHostAlloc((void**)&features2, sizeof(packed_features2_t) * policy_value_batch_maxsize, cudaHostAllocPortable));
+		checkCudaErrors(cudaHostAlloc((void**)&features2, sizeof(features2_t) * policy_value_batch_maxsize, cudaHostAllocPortable));
 		checkCudaErrors(cudaHostAlloc((void**)&y1, MAX_MOVE_LABEL_NUM * (size_t)SquareNum * policy_value_batch_maxsize * sizeof(DType), cudaHostAllocPortable));
 		checkCudaErrors(cudaHostAlloc((void**)&y2, policy_value_batch_maxsize * sizeof(DType), cudaHostAllocPortable));
 #endif
@@ -1032,7 +1032,7 @@ UctSearchGenmove(Position* pos, const Key starting_pos_key, const std::vector<Mo
 
 	// ルート局面をグローバル変数に保存
 	pos_root = pos;
-	
+
 	const uct_node_t* current_root = tree->GetCurrentHead();
 
 	// 探索情報をクリア
@@ -1146,7 +1146,7 @@ UCTSearcher::QueuingNode(const Position *pos, uct_node_t* node, float* value_win
 	std::fill_n((DType*)features2[current_policy_value_batch_index], sizeof(features2_t) / sizeof(DType), _zero);
 #else
 	std::fill_n(features1[current_policy_value_batch_index], sizeof(packed_features1_t), 0);
-	std::fill_n(features2[current_policy_value_batch_index], sizeof(packed_features2_t), 0);
+	std::fill_n((DType*)features2[current_policy_value_batch_index], sizeof(features2_t)/sizeof(DType), _zero);
 #endif
 
 	make_input_features(*pos, features1[current_policy_value_batch_index], features2[current_policy_value_batch_index]);
@@ -1275,7 +1275,7 @@ UCTSearcher::ParallelUctSearch()
 		for (int i = 0; i < policy_value_batch_maxsize; i++) {
 			// 盤面のコピー
 			Position pos(*pos_root);
-			
+
 			// 1回プレイアウトする
 			visitor_pool[i].trajectories.clear();
 			const float result = UctSearch(&pos, nullptr, current_root, visitor_pool[i]);

@@ -21,15 +21,6 @@ inline void set_features2(features2_t features2, const Color c, const int f2idx,
 	if (log_count > 0) // Only fill if count > 0
 		std::fill_n(features2[base_idx], (int)SquareNum, log_count);
 }
-inline void set_features2(packed_features2_t packed_features2, const Color c, const int f2idx, const u32 num)
-{
-    const int idx = LOG_MAX_PIECES_IN_HAND_SUM * (int)c + f2idx;
-    const int packed_idx = idx >> 1;
-    const int shift = (idx & 1) * 4;
-	u32 truncated_num = std::min(num, (u32)0x0F);
-    packed_features2[packed_idx] &= ~(0x0F << shift);           // Clear the 4 bits
-    packed_features2[packed_idx] |= ((truncated_num & 0x0F) << shift);    // Set the new value
-}
 
 // Set single features (like check, nyugyoku flags)
 inline void set_features2(features2_t features2, const int f2idx)
@@ -39,14 +30,6 @@ inline void set_features2(features2_t features2, const int f2idx)
 inline void set_features2(features2_t features2, const int f2idx, const int value)
 {
 	std::fill_n(features2[f2idx], SquareNum, std::log((float)value + 1.0f));
-}
-inline void set_features2(packed_features2_t packed_features2, const int f2idx, const int value)
-{
-    const int packed_idx = f2idx >> 1;
-    const int shift = (f2idx & 1) * 4;
-	int truncated_value = std::min(value, (int)0x0F);
-    packed_features2[packed_idx] &= ~(0x0F << shift);           // Clear the 4 bits
-    packed_features2[packed_idx] |= ((truncated_value & 0x0F) << shift);  // Set the new value
 }
 
 // make input features
@@ -149,10 +132,10 @@ void make_input_features(const Position& position, features1_t features1, featur
 	position.turn() == Black ? make_input_features<Black>(position, features1, features2) : make_input_features<White>(position, features1, features2);
 }
 
-void make_input_features(const Position& position, packed_features1_t packed_features1, packed_features2_t packed_features2) {
+void make_input_features(const Position& position, packed_features1_t packed_features1, features2_t features2) {
 	position.turn() == Black ?
-		make_input_features<Black, packed_features1_t, packed_features2_t>(position, packed_features1, packed_features2) :
-		make_input_features<White, packed_features1_t, packed_features2_t>(position, packed_features1, packed_features2);
+		make_input_features<Black, packed_features1_t, features2_t>(position, packed_features1, features2) :
+		make_input_features<White, packed_features1_t, features2_t>(position, packed_features1, features2);
 }
 
 inline MOVE_DIRECTION get_move_direction(const int dir_x, const int dir_y) {
