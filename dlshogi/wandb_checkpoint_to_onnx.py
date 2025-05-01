@@ -20,7 +20,8 @@ def main(*argv):
 
     # artifact_path = "hmatsuya/mofushogi/model-5c0vcfep:v24" # 256ch
     # artifact_path = "hmatsuya/mofushogi/model-gt0wfwia:v42" # 64ch
-    artifact_path = "hmatsuya/wcsc25/model-2t3qsi0f:v88" # 128ch 15 blocks
+    # artifact_path = "hmatsuya/wcsc25/model-2t3qsi0f:v88" # 128ch 15 blocks
+    artifact_path = "hmatsuya/wcsc25/model-9tnf6mth:v0" # test 128ch 15 blocks
 
     # download wandb model checkpoint
     api = wandb.Api()
@@ -85,6 +86,7 @@ def main(*argv):
     params = model.state_dict()
     dummy_input1 = torch.randn(1, FEATURES1_NUM, 9, 9, device='cpu')  # FEATURES1_NUM
     dummy_input2 = torch.randn(1, FEATURES2_NUM, 9, 9, device='cpu')   # FEATURES2_NUM (adjust if needed)
+    print(f"FEATURES1_NUM: {FEATURES1_NUM}, FEATURES2_NUM: {FEATURES2_NUM}")
 
     if args.fixed_batchsize is None:
         torch.onnx.export(model, (dummy_input1, dummy_input2), args.onnx,
