@@ -8,11 +8,6 @@ inline void set_features1(features1_t features1, const Color c, const int f1idx,
 {
 	features1[c][f1idx][sq] = _one;
 }
-inline void set_features1(packed_features1_t packed_features1, const Color c, const int f1idx, const Square sq)
-{
-	const int idx = MAX_FEATURES1_NUM * (int)SquareNum * (int)c + (int)SquareNum * f1idx + sq;
-	packed_features1[idx >> 3] |= (1 << (idx & 7));
-}
 
 inline void set_features2(features2_t features2, const Color c, const int f2idx, const u32 num)
 {
@@ -130,12 +125,6 @@ inline void make_input_features(const Position& position, T1 features1, T2 featu
 
 void make_input_features(const Position& position, features1_t features1, features2_t features2) {
 	position.turn() == Black ? make_input_features<Black>(position, features1, features2) : make_input_features<White>(position, features1, features2);
-}
-
-void make_input_features(const Position& position, packed_features1_t packed_features1, features2_t features2) {
-	position.turn() == Black ?
-		make_input_features<Black, packed_features1_t, features2_t>(position, packed_features1, features2) :
-		make_input_features<White, packed_features1_t, features2_t>(position, packed_features1, features2);
 }
 
 inline MOVE_DIRECTION get_move_direction(const int dir_x, const int dir_y) {
