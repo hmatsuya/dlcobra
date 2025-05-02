@@ -1,9 +1,7 @@
 from pytorch_lightning import LightningModule
 import torch
-import torch.onnx
-import onnx
-from dlshogi.common import FEATURES1_NUM, FEATURES2_NUM, MAX_MOVE_LABEL_NUM
-from dlshogi.network.policy_value_network import policy_value_network
+from dlshogi import serializers
+
 from ptl import Model
 import wandb
 import os
@@ -13,20 +11,19 @@ import argparse
 
 def main(*argv):
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--onnx', default='model.onnx', help='model file name')
-    parser.add_argument('--fixed_batchsize', type=int)
-    args = parser.parse_args(argv)
+    artifact_path = "hmatsuya/wcsc25/model-o39a8ska:v29" # 1st lr cycle, 128ch 15 blocks
 
-    # artifact_path = "hmatsuya/mofushogi/model-5c0vcfep:v24" # 256ch
-    # artifact_path = "hmatsuya/mofushogi/model-gt0wfwia:v42" # 64ch
-    # artifact_path = "hmatsuya/wcsc25/model-2t3qsi0f:v88" # 128ch 15 blocks
-    artifact_path = "hmatsuya/wcsc25/model-9tnf6mth:v0" # test 128ch 15 blocks
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--artifact', default=artifact_path, help='artifact path')
+    parser.add_argument('--model', default='model.npz', help='model file name')
+    parser.add_argument('--fixed_batchsize', type=int, help='fixed batchsize')
+    parser.add_argument('--downpath', default="download", help='download path')
+    args = parser.parse_args(argv)
 
     # download wandb model checkpoint
     api = wandb.Api()
-    artifact = api.artifact(artifact_path, type='model')
-    downpath = artifact.download('download')
+    artifact = api.artifact(args.artifact, type='model')
+    downpath = artifact.download(args.downpath)
 
     # find file with .ckpt extension in downpath
     ckpt_file = [f for f in os.listdir(downpath) if f.endswith('.ckpt')][0]
@@ -78,49 +75,11 @@ def main(*argv):
     # load model from checkpoint
     # network_class_path = config['model']['network']
     model = Model.load_from_checkpoint(ckpt_path, config=config)
-    model = model.to('cpu')
-    # model.fuse()
-    model.eval()
 
-    # export to onnx
-    params = model.state_dict()
-    dummy_input1 = torch.randn(1, FEATURES1_NUM, 9, 9, device='cpu')  # FEATURES1_NUM
-    dummy_input2 = torch.randn(1, FEATURES2_NUM, 9, 9, device='cpu')   # FEATURES2_NUM (adjust if needed)
-    print(f"FEATURES1_NUM: {FEATURES1_NUM}, FEATURES2_NUM: {FEATURES2_NUM}")
-
-    if args.fixed_batchsize is None:
-        torch.onnx.export(model, (dummy_input1, dummy_input2), args.onnx,
-            params=params,
-            dynamo=False,
-            verbose = True,
-            report=True,
-            do_constant_folding = True,
-            input_names = ['input1', 'input2'],
-            output_names = ['output_policy', 'output_value'],
-            dynamic_axes={
-                'input1' : {0 : 'batch_size'},
-                'input2' : {0 : 'batch_size'},
-                'output_policy' : {0 : 'batch_size'},
-                'output_value' : {0 : 'batch_size'},
-                })
-    else:
-        torch.onnx.export(model, (dummy_input1, dummy_input2), args.onnx,
-            params=params,
-            dynamo=False,
-            verbose = True,
-            report=True,
-            do_constant_folding = True,
-            input_names = ['input1', 'input2'],
-            output_names = ['output_policy', 'output_value'])
-
-    # Load the ONNX model
-    onnx_model = onnx.load("model.onnx")
-
-    # Check if the model is well-formed
-    onnx.checker.check_model(onnx_model)
-
-    # Print the model's graph
-    # print(onnx.helper.print_graph_text(onnx_model.graph))
+    serializers.save_npz(
+        os.path.join(downpath, args.model),
+        model.model,
+    )
 
 if __name__ == '__main__':
     main(*sys.argv[1:])
