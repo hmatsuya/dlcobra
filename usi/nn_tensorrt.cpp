@@ -17,7 +17,7 @@ class Logger : public nvinfer1::ILogger
 		default: assert(0); return "";
 		}
 	}
-	void log(Severity severity, nvinfer1::AsciiChar const* msg) noexcept override // TRT 9+ uses AsciiChar
+	void log(Severity severity, const char* msg) noexcept
 	{
 		if (severity == Severity::kINTERNAL_ERROR) {
 			std::cerr << error_type(severity) << msg << std::endl;
@@ -34,6 +34,7 @@ NNTensorRT::NNTensorRT(const char* filename, const int gpu_id, const int max_bat
 {
 	// Create host and device buffers
 	checkCudaErrors(cudaMalloc((void**)&p1_dev, sizeof(packed_features1_t) * max_batch_size));
+	checkCudaErrors(cudaMalloc((void**)&p2_dev, sizeof(packed_features2_t) * max_batch_size));
 	checkCudaErrors(cudaMalloc((void**)&x1_dev, sizeof(features1_t) * max_batch_size));
 	checkCudaErrors(cudaMalloc((void**)&x2_dev, sizeof(features2_t) * max_batch_size));
 	checkCudaErrors(cudaMalloc((void**)&y1_dev, MAX_MOVE_LABEL_NUM * (size_t)SquareNum * max_batch_size * sizeof(DType)));
@@ -47,6 +48,7 @@ NNTensorRT::NNTensorRT(const char* filename, const int gpu_id, const int max_bat
 NNTensorRT::~NNTensorRT()
 {
 	checkCudaErrors(cudaFree(p1_dev));
+	checkCudaErrors(cudaFree(p2_dev));
 	checkCudaErrors(cudaFree(x1_dev));
 	checkCudaErrors(cudaFree(x2_dev));
 	checkCudaErrors(cudaFree(y1_dev));
@@ -61,9 +63,8 @@ void NNTensorRT::build(const std::string& onnx_filename)
 		throw std::runtime_error("createInferBuilder");
 	}
 
-	// const auto explicitBatch = 1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH); // Deprecated
-	// Create network without flags, explicit batch is default in TRT 10
-	auto network = InferUniquePtr<nvinfer1::INetworkDefinition>(builder->createNetworkV2(0U));
+	const auto explicitBatch = 1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
+	auto network = InferUniquePtr<nvinfer1::INetworkDefinition>(builder->createNetworkV2(explicitBatch));
 	if (!network)
 	{
 		throw std::runtime_error("createNetworkV2");
@@ -84,18 +85,15 @@ void NNTensorRT::build(const std::string& onnx_filename)
 	auto parsed = parser->parseFromFile(onnx_filename.c_str(), (int)nvinfer1::ILogger::Severity::kWARNING);
 	if (!parsed)
 	{
-		for (int i = 0; i < parser->getNbErrors(); ++i) {
-			std::cerr << "ONNX Parser Error: " << parser->getError(i)->desc() << std::endl;
-		}
-		throw std::runtime_error("parseFromFile failed: " + onnx_filename);
+		throw std::runtime_error("parseFromFile");
 	}
 
-	// builder->setMaxBatchSize(max_batch_size); // Deprecated for explicit batch
-	config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE, 64_MiB); // Replaces setMaxWorkspaceSize
+	builder->setMaxBatchSize(max_batch_size);
+	config->setMaxWorkspaceSize(64_MiB);
 
 	std::unique_ptr<nvinfer1::IInt8Calibrator> calibrator;
-	// if (builder->platformHasFastInt8()) // Deprecated platform check
-	// {
+	if (builder->platformHasFastInt8())
+	{
 		// キャリブレーションキャッシュがある場合のみINT8を使用
 		std::string calibration_cache_filename = std::string(onnx_filename) + ".calibcache";
 		std::ifstream calibcache(calibration_cache_filename);
@@ -105,20 +103,17 @@ void NNTensorRT::build(const std::string& onnx_filename)
 
 			config->setFlag(nvinfer1::BuilderFlag::kINT8);
 			calibrator.reset(new Int8EntropyCalibrator2(onnx_filename.c_str(), 1));
-			config->setInt8Calibrator(calibrator.get()); // Still uses deprecated calibrator API, will warn
+			config->setInt8Calibrator(calibrator.get());
 		}
-		else // No calibration cache, try FP16
+		else if (builder->platformHasFastFp16())
 		{
-			// if (builder->platformHasFastFp16()) // Deprecated platform check
-			// {
 			config->setFlag(nvinfer1::BuilderFlag::kFP16);
-			// }
 		}
-	// }
-	// else if (builder->platformHasFastFp16()) // Deprecated platform check
-	// {
-	// 	config->setFlag(nvinfer1::BuilderFlag::kFP16);
-	// }
+	}
+	else if (builder->platformHasFastFp16())
+	{
+		config->setFlag(nvinfer1::BuilderFlag::kFP16);
+	}
 
 #ifdef FP16
 	network->getInput(0)->setType(nvinfer1::DataType::kHALF);
@@ -128,21 +123,19 @@ void NNTensorRT::build(const std::string& onnx_filename)
 #endif
 
 	assert(network->getNbInputs() == 2);
-	// Get dimensions by name for profile setting (assuming names "input1", "input2")
-	nvinfer1::Dims inputDims1 = network->getInput(0)->getDimensions(); // Still need index here for network definition
-	nvinfer1::Dims inputDims2 = network->getInput(1)->getDimensions();
-	assert(inputDims1.nbDims == 4);
-	assert(inputDims2.nbDims == 4);
+	nvinfer1::Dims inputDims[] = { network->getInput(0)->getDimensions(), network->getInput(1)->getDimensions() };
+	assert(inputDims[0].nbDims == 4);
+	assert(inputDims[1].nbDims == 4);
 
 	assert(network->getNbOutputs() == 2);
 
 	// Optimization Profiles
 	auto profile = builder->createOptimizationProfile();
-	const auto dims1 = inputDims1.d; // Use named dim variable
+	const auto dims1 = inputDims[0].d;
 	profile->setDimensions("input1", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(1, dims1[1], dims1[2], dims1[3]));
 	profile->setDimensions("input1", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(max_batch_size, dims1[1], dims1[2], dims1[3]));
 	profile->setDimensions("input1", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(max_batch_size, dims1[1], dims1[2], dims1[3]));
-	const auto dims2 = inputDims2.d; // Use named dim variable
+	const auto dims2 = inputDims[1].d;
 	profile->setDimensions("input2", nvinfer1::OptProfileSelector::kMIN, nvinfer1::Dims4(1, dims2[1], dims2[2], dims2[3]));
 	profile->setDimensions("input2", nvinfer1::OptProfileSelector::kOPT, nvinfer1::Dims4(max_batch_size, dims2[1], dims2[2], dims2[3]));
 	profile->setDimensions("input2", nvinfer1::OptProfileSelector::kMAX, nvinfer1::Dims4(max_batch_size, dims2[1], dims2[2], dims2[3]));
@@ -194,19 +187,12 @@ void NNTensorRT::load_model(const char* filename)
 		seriarizedFile.read(blob.get(), modelSize);
 		auto runtime = InferUniquePtr<nvinfer1::IRuntime>(nvinfer1::createInferRuntime(gLogger));
 		engine = InferUniquePtr<nvinfer1::ICudaEngine>(runtime->deserializeCudaEngine(blob.get(), modelSize));
-		if (!engine) {
-			throw std::runtime_error("Failed to deserialize TensorRT engine from file: " + serialized_filename);
-		}
 	}
 	else
 	{
 
 		// build
 		build(filename);
-
-		if (!engine) {
-			throw std::runtime_error("Failed to build TensorRT engine from ONNX: " + std::string(filename));
-		}
 
 		// serializing a model
 		auto serializedEngine = InferUniquePtr<nvinfer1::IHostMemory>(engine->serialize());
@@ -225,35 +211,31 @@ void NNTensorRT::load_model(const char* filename)
 			throw std::runtime_error("Cannot open engine file");
 		}
 	}
+
 	context = InferUniquePtr<nvinfer1::IExecutionContext>(engine->createExecutionContext());
 	if (!context)
 	{
 		throw std::runtime_error("createExecutionContext");
 	}
 
-	// Get tensor shapes by name after engine creation/deserialization
-	// Assuming tensor names are "input1" and "input2" based on optimization profile
-	inputDims1 = engine->getTensorShape("input1");
-	inputDims2 = engine->getTensorShape("input2");
+	inputDims1 = engine->getBindingDimensions(0);
+	inputDims2 = engine->getBindingDimensions(1);
 }
 
-void NNTensorRT::forward(const int batch_size, packed_features1_t* p1, features2_t* p2, DType* y1, DType* y2)
+void NNTensorRT::forward(const int batch_size, packed_features1_t* p1, packed_features2_t* p2, DType* y1, DType* y2)
 {
-    inputDims1.d[0] = batch_size;
-    inputDims2.d[0] = batch_size;
-    // Set input shapes by name before running inference
-    context->setInputShape("input1", inputDims1);
-    context->setInputShape("input2", inputDims2);
+	inputDims1.d[0] = batch_size;
+	inputDims2.d[0] = batch_size;
+	context->setBindingDimensions(0, inputDims1);
+	context->setBindingDimensions(1, inputDims2);
 
-    checkCudaErrors(cudaMemcpyAsync(p1_dev, p1, sizeof(packed_features1_t) * batch_size, cudaMemcpyHostToDevice, cudaStreamPerThread));
-    unpack_features1(batch_size, p1_dev, x1_dev, cudaStreamPerThread);
-    // Directly copy already-unpacked features2 to x2_dev
-    checkCudaErrors(cudaMemcpyAsync(x2_dev, p2, sizeof(features2_t) * batch_size, cudaMemcpyHostToDevice, cudaStreamPerThread));
-
-    const bool status = context->enqueueV3(cudaStreamPerThread);
-    assert(status);
-
-    checkCudaErrors(cudaMemcpyAsync(y1, y1_dev, sizeof(DType) * MAX_MOVE_LABEL_NUM * (size_t)SquareNum * batch_size, cudaMemcpyDeviceToHost, cudaStreamPerThread));
-    checkCudaErrors(cudaMemcpyAsync(y2, y2_dev, sizeof(DType) * batch_size, cudaMemcpyDeviceToHost, cudaStreamPerThread));
-    checkCudaErrors(cudaStreamSynchronize(cudaStreamPerThread));
+	checkCudaErrors(cudaMemcpyAsync(p1_dev, p1, sizeof(packed_features1_t) * batch_size, cudaMemcpyHostToDevice, cudaStreamPerThread));
+	checkCudaErrors(cudaMemcpyAsync(p2_dev, p2, sizeof(packed_features2_t) * batch_size, cudaMemcpyHostToDevice, cudaStreamPerThread));
+	unpack_features1(batch_size, p1_dev, x1_dev, cudaStreamPerThread);
+	unpack_features2(batch_size, p2_dev, x2_dev, cudaStreamPerThread);
+	const bool status = context->enqueue(batch_size, inputBindings.data(), cudaStreamPerThread, nullptr);
+	assert(status);
+	checkCudaErrors(cudaMemcpyAsync(y1, y1_dev, sizeof(DType) * MAX_MOVE_LABEL_NUM * (size_t)SquareNum * batch_size , cudaMemcpyDeviceToHost, cudaStreamPerThread));
+	checkCudaErrors(cudaMemcpyAsync(y2, y2_dev, sizeof(DType) * batch_size, cudaMemcpyDeviceToHost, cudaStreamPerThread));
+	checkCudaErrors(cudaStreamSynchronize(cudaStreamPerThread));
 }
