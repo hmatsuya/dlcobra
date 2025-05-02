@@ -244,7 +244,6 @@ ModelManifest.xml
 /testdata
 /dlshogi/*.txt
 /dlshogi/state*
-/dlshogi/model*
 /dlshogi/floodgate_train.txt
 /dlshogi/floodgate_test.txt
 /dlshogi/**/__pycache__
