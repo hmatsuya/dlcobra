@@ -1,4 +1,4 @@
-﻿#include <algorithm>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <climits>

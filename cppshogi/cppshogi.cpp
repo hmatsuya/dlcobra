@@ -1,4 +1,4 @@
-﻿#include <numeric>
+#include <numeric>
 #include <algorithm>
 #include <cmath> // For std::log2, std::ceil
 

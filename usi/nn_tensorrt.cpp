@@ -34,7 +34,6 @@ NNTensorRT::NNTensorRT(const char* filename, const int gpu_id, const int max_bat
 {
 	// Create host and device buffers
 	checkCudaErrors(cudaMalloc((void**)&p1_dev, sizeof(packed_features1_t) * max_batch_size));
-	checkCudaErrors(cudaMalloc((void**)&p2_dev, sizeof(packed_features2_t) * max_batch_size));
 	checkCudaErrors(cudaMalloc((void**)&x1_dev, sizeof(features1_t) * max_batch_size));
 	checkCudaErrors(cudaMalloc((void**)&x2_dev, sizeof(features2_t) * max_batch_size));
 	checkCudaErrors(cudaMalloc((void**)&y1_dev, MAX_MOVE_LABEL_NUM * (size_t)SquareNum * max_batch_size * sizeof(DType)));
@@ -48,7 +47,6 @@ NNTensorRT::NNTensorRT(const char* filename, const int gpu_id, const int max_bat
 NNTensorRT::~NNTensorRT()
 {
 	checkCudaErrors(cudaFree(p1_dev));
-	checkCudaErrors(cudaFree(p2_dev));
 	checkCudaErrors(cudaFree(x1_dev));
 	checkCudaErrors(cudaFree(x2_dev));
 	checkCudaErrors(cudaFree(y1_dev));
@@ -222,7 +220,7 @@ void NNTensorRT::load_model(const char* filename)
 	inputDims2 = engine->getBindingDimensions(1);
 }
 
-void NNTensorRT::forward(const int batch_size, packed_features1_t* p1, packed_features2_t* p2, DType* y1, DType* y2)
+void NNTensorRT::forward(const int batch_size, packed_features1_t* p1, features2_t* x2, DType* y1, DType* y2)
 {
 	inputDims1.d[0] = batch_size;
 	inputDims2.d[0] = batch_size;
@@ -230,9 +228,8 @@ void NNTensorRT::forward(const int batch_size, packed_features1_t* p1, packed_fe
 	context->setBindingDimensions(1, inputDims2);
 
 	checkCudaErrors(cudaMemcpyAsync(p1_dev, p1, sizeof(packed_features1_t) * batch_size, cudaMemcpyHostToDevice, cudaStreamPerThread));
-	checkCudaErrors(cudaMemcpyAsync(p2_dev, p2, sizeof(packed_features2_t) * batch_size, cudaMemcpyHostToDevice, cudaStreamPerThread));
 	unpack_features1(batch_size, p1_dev, x1_dev, cudaStreamPerThread);
-	unpack_features2(batch_size, p2_dev, x2_dev, cudaStreamPerThread);
+	checkCudaErrors(cudaMemcpyAsync(x2_dev, x2, sizeof(features2_t) * batch_size, cudaMemcpyHostToDevice, cudaStreamPerThread));
 	const bool status = context->enqueue(batch_size, inputBindings.data(), cudaStreamPerThread, nullptr);
 	assert(status);
 	checkCudaErrors(cudaMemcpyAsync(y1, y1_dev, sizeof(DType) * MAX_MOVE_LABEL_NUM * (size_t)SquareNum * batch_size , cudaMemcpyDeviceToHost, cudaStreamPerThread));
