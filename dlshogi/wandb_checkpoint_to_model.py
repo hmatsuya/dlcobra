@@ -11,7 +11,7 @@ import argparse
 
 def main(*argv):
 
-    artifact_path = "hmatsuya/wcsc25/model-o39a8ska:v29" # 1st lr cycle, 128ch 15 blocks
+    artifact_path = "hmatsuya/wcsc25/model-o39a8ska:v51" # 1st lr cycle, 128ch 15 blocks
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--artifact', default=artifact_path, help='artifact path')
