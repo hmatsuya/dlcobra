@@ -286,7 +286,7 @@ void MySearcher::doUSICommandLoop(int argc, char* argv[]) {
 			if (!initialized) {
 				// 各種初期化
 				InitializeUctSearch(options["UCT_NodeLimit"]);
-				const std::string model_paths[max_gpu] = { options["DNN_Model"], options["DNN_Model2"], options["DNN_Model3"], options["DNN_Model4"], options["DNN_Model5"], options["DNN_Model6"], options["DNN_Model7"], options["DNN_Model8"] };
+				const std::string model_paths[max_gpu] = { options["DNN_Model"], options["DNN_Model2"], options["DNN_Model3"], options["DNN_Model4"], options["DNN_Model5"], options["DNN_Model6"], options["DNN_Model7"], options["DNN_Model8"], options["DNN_Model9"], options["DNN_Model10"] };
 				// モデルファイル存在チェック
 				{
 					bool is_err = false;
@@ -327,8 +327,8 @@ void MySearcher::doUSICommandLoop(int argc, char* argv[]) {
                     read_book(options["Book_File"], bookMap);
                 }
 #endif
-                const int new_thread[max_gpu] = { options["UCT_Threads"], options["UCT_Threads2"], options["UCT_Threads3"], options["UCT_Threads4"], options["UCT_Threads5"], options["UCT_Threads6"], options["UCT_Threads7"], options["UCT_Threads8"] };
-				const int new_policy_value_batch_maxsize[max_gpu] = { options["DNN_Batch_Size"], options["DNN_Batch_Size2"], options["DNN_Batch_Size3"], options["DNN_Batch_Size4"], options["DNN_Batch_Size5"], options["DNN_Batch_Size6"], options["DNN_Batch_Size7"], options["DNN_Batch_Size8"] };
+                const int new_thread[max_gpu] = { options["UCT_Threads"], options["UCT_Threads2"], options["UCT_Threads3"], options["UCT_Threads4"], options["UCT_Threads5"], options["UCT_Threads6"], options["UCT_Threads7"], options["UCT_Threads8"], options["UCT_Threads9"], options["UCT_Threads10"] };
+				const int new_policy_value_batch_maxsize[max_gpu] = { options["DNN_Batch_Size"], options["DNN_Batch_Size2"], options["DNN_Batch_Size3"], options["DNN_Batch_Size4"], options["DNN_Batch_Size5"], options["DNN_Batch_Size6"], options["DNN_Batch_Size7"], options["DNN_Batch_Size8"], options["DNN_Batch_Size9"], options["DNN_Batch_Size10"] };
 				SetThread(new_thread, new_policy_value_batch_maxsize);
 
 				if (options["Mate_Root_Search"] > 0) {
