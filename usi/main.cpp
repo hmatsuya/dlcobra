@@ -277,7 +277,7 @@ void MySearcher::doUSICommandLoop(int argc, char* argv[]) {
 		}
 		else if (token == "usinewgame"); // isready で準備は出来たので、対局開始時に特にする事はない。
 		else if (token == "usi") std::cout << "id name " << std::string(options["Engine_Name"])
-			<< "\nid author Tadao Yamaoka"
+			<< "\nid author Tadao Yamaoka | Hiroaki Matsuyama"
 			<< "\n" << options
 			<< "\nusiok" << std::endl;
 		else if (token == "isready") { // 対局開始前の準備。
