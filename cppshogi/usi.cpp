@@ -205,9 +205,9 @@ void OptionsMap::init(Searcher* s) {
 #endif
     (*this)["DebugMessage"]                = USIOption(false);
 #ifdef NDEBUG
-    (*this)["Engine_Name"]                 = USIOption("dlcobra wcsc35");
+    (*this)["Engine_Name"]                 = USIOption("dlcobra wcsc36");
 #else
-    (*this)["Engine_Name"]                 = USIOption("dlcobra wcsc35 Debug Build");
+    (*this)["Engine_Name"]                 = USIOption("dlcobra wcsc36 Debug Build");
 #endif
 }
 
