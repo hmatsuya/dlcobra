@@ -264,3 +264,4 @@ model/
 .ipynb_checkpoints
 
 [Dd]ownload/
+.venv/
