@@ -63,8 +63,12 @@ void NNTensorRT::build(const std::string& onnx_filename)
 		throw std::runtime_error("createInferBuilder");
 	}
 
+#if NV_TENSORRT_MAJOR >= 10
+	auto network = InferUniquePtr<nvinfer1::INetworkDefinition>(builder->createNetworkV2(0));
+#else
 	const auto explicitBatch = 1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
 	auto network = InferUniquePtr<nvinfer1::INetworkDefinition>(builder->createNetworkV2(explicitBatch));
+#endif
 	if (!network)
 	{
 		throw std::runtime_error("createNetworkV2");
@@ -88,8 +92,12 @@ void NNTensorRT::build(const std::string& onnx_filename)
 		throw std::runtime_error("parseFromFile");
 	}
 
+#if NV_TENSORRT_MAJOR >= 10
+	config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE, 64_MiB);
+#else
 	builder->setMaxBatchSize(max_batch_size);
 	config->setMaxWorkspaceSize(64_MiB);
+#endif
 
 	std::unique_ptr<nvinfer1::IInt8Calibrator> calibrator;
 	if (builder->platformHasFastInt8())
@@ -218,22 +226,40 @@ void NNTensorRT::load_model(const char* filename)
 		throw std::runtime_error("createExecutionContext");
 	}
 
+#if NV_TENSORRT_MAJOR >= 10
+	inputDims1 = engine->getTensorShape("input1");
+	inputDims2 = engine->getTensorShape("input2");
+#else
 	inputDims1 = engine->getBindingDimensions(0);
 	inputDims2 = engine->getBindingDimensions(1);
+#endif
 }
 
 void NNTensorRT::forward(const int batch_size, packed_features1_t* p1, packed_features2_t* p2, DType* y1, DType* y2)
 {
 	inputDims1.d[0] = batch_size;
 	inputDims2.d[0] = batch_size;
+#if NV_TENSORRT_MAJOR >= 10
+	context->setInputShape("input1", inputDims1);
+	context->setInputShape("input2", inputDims2);
+#else
 	context->setBindingDimensions(0, inputDims1);
 	context->setBindingDimensions(1, inputDims2);
+#endif
 
 	checkCudaErrors(cudaMemcpyAsync(p1_dev, p1, sizeof(packed_features1_t) * batch_size, cudaMemcpyHostToDevice, cudaStreamPerThread));
 	checkCudaErrors(cudaMemcpyAsync(p2_dev, p2, sizeof(packed_features2_t) * batch_size, cudaMemcpyHostToDevice, cudaStreamPerThread));
 	unpack_features1(batch_size, p1_dev, x1_dev, cudaStreamPerThread);
 	unpack_features2(batch_size, p2_dev, x2_dev, cudaStreamPerThread);
+#if NV_TENSORRT_MAJOR >= 10
+	context->setTensorAddress("input1", x1_dev);
+	context->setTensorAddress("input2", x2_dev);
+	context->setTensorAddress("output_policy", y1_dev);
+	context->setTensorAddress("output_value", y2_dev);
+	const bool status = context->enqueueV3(cudaStreamPerThread);
+#else
 	const bool status = context->enqueue(batch_size, inputBindings.data(), cudaStreamPerThread, nullptr);
+#endif
 	assert(status);
 	checkCudaErrors(cudaMemcpyAsync(y1, y1_dev, sizeof(DType) * MAX_MOVE_LABEL_NUM * (size_t)SquareNum * batch_size , cudaMemcpyDeviceToHost, cudaStreamPerThread));
 	checkCudaErrors(cudaMemcpyAsync(y2, y2_dev, sizeof(DType) * batch_size, cudaMemcpyDeviceToHost, cudaStreamPerThread));
