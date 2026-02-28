@@ -14,11 +14,12 @@ apt install -y aptitude
 
 # # Add CUDA key ring
 # cd /tmp
-# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+# wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
 # dpkg -i cuda-keyring_1.1-1_all.deb
 # apt update
 
-# # install TensorRT
+# # install TensorRT 10.12+
+
 # # Not working. Use aptitude instead to install TensorRT.
 # apt install -y libnvinfer-bin:amd64=8.6.1.6-1+cuda12.0
 # apt install -y libnvinfer-dev:amd64=8.6.1.6-1+cuda12.0
