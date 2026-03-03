@@ -1,0 +1,5 @@
+# exp001: fewer activations (ConvNeXt-style)
+# Uses a modified ResNet block with one activation per block instead of two.
+# Block: Conv -> BN -> Conv -> BN -> (+residual) -> Swish
+model:
+  network: dlshogi.experiments.exp001_fewer_activations.model.PolicyValueNetwork

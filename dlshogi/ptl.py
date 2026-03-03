@@ -428,6 +428,14 @@ class Model(pl.LightningModule):
 
 
 class CustomLightningCLI(LightningCLI):
+    def add_arguments_to_parser(self, parser):
+        parser.add_argument(
+            "--debug",
+            action="store_true",
+            default=False,
+            help="Debug mode: few batches, 2 epochs, no WandB, small val_check_interval",
+        )
+
     @staticmethod
     def configure_optimizers(lightning_module, optimizer, lr_scheduler=None):
         if lightning_module.hparams.lr_scheduler_interval == "epoch":
@@ -448,6 +456,31 @@ class CustomLightningCLI(LightningCLI):
                 ),
             },
         }
+
+    def before_instantiate_classes(self):
+        super().before_instantiate_classes()
+        subcommand = self.config.get("subcommand")
+        cfg = self.config.get(subcommand) if subcommand else self.config
+        if not cfg.get("debug", False):
+            return
+
+        logger.info("*** DEBUG MODE: limiting batches and epochs ***")
+        cfg["trainer"]["max_epochs"] = 2
+        cfg["trainer"]["limit_train_batches"] = 10
+        cfg["trainer"]["limit_val_batches"] = 5
+        cfg["trainer"]["limit_test_batches"] = 5
+        cfg["trainer"]["val_check_interval"] = 5
+        cfg["trainer"]["log_every_n_steps"] = 1
+        # Replace WandB with a simple CSV logger for debug runs
+        cfg["trainer"]["logger"] = {
+            "class_path": "lightning.pytorch.loggers.CSVLogger",
+            "init_args": {"save_dir": "./lightning_logs"},
+        }
+        # Disable early stopping patience (not useful for 2 epochs)
+        cfg["trainer"]["callbacks"] = [
+            cb for cb in (cfg["trainer"].get("callbacks") or [])
+            if cb.get("class_path") != "lightning.pytorch.callbacks.EarlyStopping"
+        ]
 
 
 def main():
