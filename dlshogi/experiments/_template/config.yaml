@@ -1,0 +1,6 @@
+# expNNN: DESCRIPTION
+# Only include values that differ from base dlshogi/config.yaml
+
+# For custom network, uncomment:
+# model:
+#   network: dlshogi.experiments.expNNN_description.model.PolicyValueNetwork
