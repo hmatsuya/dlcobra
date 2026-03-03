@@ -50,7 +50,29 @@ DeepLearningShogi/
 - Directory naming: `expNNN_short_description/` (underscore, importable)
 - Each experiment overrides only changed values from base config
 - Custom networks referenced via fully-qualified class path
+- Template: copy `dlshogi/experiments/_template/` to create new experiments
 - See `dlshogi/experiments/README.md` for step-by-step creation guide
+
+### Experiment Logging
+- 実装、動作確認が完了したら、`dlshogi/experiments/log.md`に実験ログを追加する
+- 実験ログには以下を簡潔に記載（5行程度）:
+  - 実験名
+  - ベースとした実験名
+  - 改善内容
+- 新しいログは上に追加していく（最新が先頭）
+
+Example:
+```markdown
+### exp116: Focal Lossへの変更
+**日付**: 2025-12-09
+**ベース実験**: exp113
+**改善内容**:
+- BCE (Binary Cross Entropy) LossをFocal Lossに変更
+- Focal Lossはクラス不均衡問題に対処する損失関数
+- パラメータ: alpha=0.25、gamma=2.0(標準的な値を使用)
+- 数式: FL(pt) = -α(1-pt)^γ * log(pt)
+- 予測が難しいサンプル (確信度が低い) に重みを置く設計
+```
 
 ### Data Pipeline
 - Raw: CSA/KIF game records
