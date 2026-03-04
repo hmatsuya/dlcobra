@@ -26,7 +26,7 @@ onnx           # Model export
 - Apery-derived Shogi library (board management, move generation)
 
 ## Build Systems
-- Pipenv (Python dependencies)
+- venv (Python virtual environment)
 - Visual Studio 2022 (Windows C++ builds)
 - g++ / Make (Linux C++ builds)
 
@@ -34,19 +34,13 @@ onnx           # Model export
 
 ### Python Environment
 ```bash
-pipenv install          # Install dependencies
-pipenv shell            # Activate virtualenv
+source .venv/bin/activate  # Activate virtualenv
+pip install -r requirements.txt  # Install dependencies (if needed)
 ```
 
 ### Training
 ```bash
-# Run training with config
-python -m dlshogi.ptl fit --config dlshogi/config.yaml
-
-# Debug mode (2 epochs, no WandB)
-python -m dlshogi.ptl fit --config dlshogi/config.yaml --debug
-
-# Run experiment
+# Run experiment (venv activation handled by run.sh)
 bash dlshogi/experiments/exp001_fewer_activations/run.sh
 bash dlshogi/experiments/exp001_fewer_activations/run.sh --debug
 ```
