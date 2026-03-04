@@ -14,5 +14,6 @@ export PYTHONPATH="$REPO_ROOT:$PYTHONPATH"
 python ptl.py fit \
   --config config.yaml \
   --config "$SCRIPT_DIR/config.yaml" \
+  --trainer.logger.init_args.name="$EXP_NAME" \
   "$@" \
   2>&1 | tee "$SCRIPT_DIR/fit.log"
