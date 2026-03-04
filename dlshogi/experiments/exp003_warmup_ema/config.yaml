@@ -1,0 +1,23 @@
+# exp003: Extended warmup and EMA testing
+# Only include values that differ from base dlshogi/config.yaml
+
+model:
+  use_ema: true
+  update_bn: true
+  ema_start_epoch: 0
+  ema_freq: 100
+  ema_decay: 0.99
+
+lr_scheduler:
+  class_path: dlshogi.lr_scheduler.CosineLRScheduler
+  init_args:
+    t_initial: 300000
+    lr_min: 1.0e-05
+    cycle_mul: 2
+    cycle_decay: 0.5
+    cycle_limit: 8
+    warmup_t: 30000
+    warmup_lr_init: 1.0e-06
+    warmup_prefix: true
+    k_decay: 1.0
+    last_epoch: -1
