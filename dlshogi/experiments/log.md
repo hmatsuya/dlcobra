@@ -1,5 +1,15 @@
 # Experiment Log
 
+### exp006: Single cycle cosine annealing
+**日付**: 2026-03-05
+**ベース実験**: exp004
+**改善内容**:
+- 単一サイクルのcosine annealingに変更: cycle_limit=8→1
+- サイクル長を大幅に延長: t_initial=300000→3000000
+- warmup期間を調整: warmup_t=30000→150000（t_initialの5%）
+- cycle_mul=1.0（サイクル長を変えない）、cycle_decay=1.0（減衰なし）
+- 長期間の単一サイクルで学習率を緩やかに減衰させる効果を検証
+
 ### exp005: Extended warmup with higher initial LR
 **日付**: 2026-03-04
 **ベース実験**: exp004
