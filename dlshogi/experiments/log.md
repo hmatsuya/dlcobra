@@ -1,5 +1,13 @@
 # Experiment Log
 
+### exp005: Extended warmup with higher initial LR
+**日付**: 2026-03-04
+**ベース実験**: exp004
+**改善内容**:
+- warmup開始学習率をさらに引き上げ: warmup_lr_init=1e-6→1e-5
+- exp004との比較により、warmup初期学習率の影響を検証
+- より高い初期学習率での収束性と安定性を評価
+
 ### exp004: Extended warmup only (no EMA)
 **日付**: 2026-03-04
 **ベース実験**: なし（ベース設定からの変更）
