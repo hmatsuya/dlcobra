@@ -1,5 +1,24 @@
 # Experiment Log
 
+### exp004: Extended warmup only (no EMA)
+**日付**: 2026-03-04
+**ベース実験**: なし（ベース設定からの変更）
+**改善内容**:
+- warmup期間を大幅に延長: warmup_t=10→30000（t_initialの10%）
+- warmup開始学習率を調整: warmup_lr_init=1e-7→1e-6
+- EMAは使用せず、warmup単独の効果を検証
+- exp003との比較により、EMAの追加効果を測定可能
+
+### exp003: Extended warmup and EMA testing
+**日付**: 2026-03-04
+**ベース実験**: なし（ベース設定からの変更）
+**改善内容**:
+- EMAを有効化（use_ema=true, update_bn=true）
+- EMA設定: ema_start_epoch=0（最初から開始）, ema_freq=100, ema_decay=0.99
+- warmup期間を大幅に延長: warmup_t=10→30000（t_initialの10%）
+- warmup開始学習率を調整: warmup_lr_init=1e-7→1e-6
+- EMAによるモデル重みの平滑化と、長いwarmupによる安定した学習開始の効果を検証
+
 ### exp002: LRスケジューリングのパラメータ調整（t_initial=50000, warmup_t=5000）
 **日付**: 2026-03-03
 **ベース実験**: なし（ベース設定からの変更）
