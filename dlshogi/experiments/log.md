@@ -1,5 +1,15 @@
 # Experiment Log
 
+### exp008: ConvNeXt-style channel distribution
+**日付**: 2026-03-10
+**ベース実験**: exp001
+**改善内容**:
+- ConvNeXtのチャンネル分布を採用: depths=[2, 2, 9, 2], dims=[96, 192, 384, 768]
+- 4ステージ構成でチャンネル数を段階的に増加（96→192→384→768）
+- 各ブロックはdepthwise conv + LayerNorm + inverted bottleneck (×4) + GELUのConvNeXt構造
+- ステージ間はLayerNorm + 1x1 convでチャンネル数を変換（9x9盤面のため空間解像度は維持）
+- 活性化関数はGELU、正規化はLayerNorm（BatchNormの代わり）
+
 ### exp006: Single cycle cosine annealing
 **日付**: 2026-03-05
 **ベース実験**: exp004

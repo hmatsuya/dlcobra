@@ -1,0 +1,5 @@
+# exp008: ConvNeXt-style channel distribution
+# 4-stage architecture with increasing channel widths
+# depths=[1, 1, 3, 1], dims=[96, 192, 384, 768]
+model:
+  network: dlshogi.experiments.exp008_convnext_channel_dist.model.PolicyValueNetwork
