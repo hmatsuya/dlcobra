@@ -58,6 +58,7 @@ DeepLearningShogi/
 - 実験ログには以下を簡潔に記載（5行程度）:
   - 実験名
   - ベースとした実験名
+  - パラメータ数（デバッグ実行時のモデルサマリーから取得）
   - 改善内容
 - 新しいログは上に追加していく（最新が先頭）
 
@@ -66,6 +67,7 @@ Example:
 ### exp116: Focal Lossへの変更
 **日付**: 2025-12-09
 **ベース実験**: exp113
+**パラメータ数**: 20.5M
 **改善内容**:
 - BCE (Binary Cross Entropy) LossをFocal Lossに変更
 - Focal Lossはクラス不均衡問題に対処する損失関数
@@ -73,6 +75,11 @@ Example:
 - 数式: FL(pt) = -α(1-pt)^γ * log(pt)
 - 予測が難しいサンプル (確信度が低い) に重みを置く設計
 ```
+
+### New Experiment Checklist
+新しい実験を作成したら以下を実施する:
+1. デバッグモードで動作確認: `bash dlshogi/experiments/expNNN_.../run.sh --debug`
+2. モデルサマリーのTrainable paramsを確認し、`log.md`の`**パラメータ数**`に記載
 
 ### Data Pipeline
 - Raw: CSA/KIF game records

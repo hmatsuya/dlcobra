@@ -49,5 +49,18 @@ bash dlshogi/experiments/exp001_fewer_activations/run.sh --trainer.max_epochs=10
    model:
      network: dlshogi.experiments.expNNN_short_description.model.PolicyValueNetwork
    ```
+6. Run in debug mode to verify it starts correctly:
+   ```bash
+   bash dlshogi/experiments/expNNN_short_description/run.sh --debug
+   ```
+7. Add an entry to `log.md` (newest first) including the trainable parameter count:
+   ```markdown
+   ### expNNN: 説明
+   **日付**: YYYY-MM-DD
+   **ベース実験**: expMMM
+   **パラメータ数**: X.XM
+   **改善内容**:
+   - ...
+   ```
 
 LightningCLI stacks configs: later `--config` files override earlier ones.
