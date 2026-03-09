@@ -1,5 +1,15 @@
 # Experiment Log
 
+### exp010: ConvNeXt flat (single-stage)
+**日付**: 2026-03-10
+**ベース実験**: exp008
+**パラメータ数**: 6.0M
+**改善内容**:
+- 4ステージ構成からフラット（単一ステージ）に変更: depths=[10], dims=[256]
+- チャンネル数を全ブロックで均一（256ch）に統一、ステージ間のダウンサンプリングなし
+- ConvNeXtブロックはexp008と同じ（depthwise conv + LayerNorm + inverted bottleneck + GELU）
+- 基本のresnet10（192ch）との比較: ConvNeXtブロック × フラット構成
+
 ### exp009: ResNet-style channel distribution
 **日付**: 2026-03-10
 **ベース実験**: exp008

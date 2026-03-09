@@ -1,0 +1,4 @@
+# exp010: ConvNeXt flat (single-stage)
+# depths=[10], dims=[256]
+model:
+  network: dlshogi.experiments.exp010_convnext_flat.model.PolicyValueNetwork
