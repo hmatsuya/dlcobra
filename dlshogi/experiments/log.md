@@ -1,10 +1,21 @@
 # Experiment Log
 
+### exp009: ResNet-style channel distribution
+**日付**: 2026-03-10
+**ベース実験**: exp008
+**パラメータ数**: 20.5M
+**改善内容**:
+- exp008と同じチャンネル分布を維持: depths=[1, 1, 3, 1], dims=[96, 192, 384, 768]
+- ConvNeXtブロック（depthwise conv + LayerNorm + inverted bottleneck）を通常のResNetブロックに変更
+- ResNetブロック: BN -> ReLU -> Conv3x3 -> BN -> ReLU -> Conv3x3 + residual
+- 正規化をLayerNormからBatchNormに変更、活性化関数をGELUからReLUに変更
+- ConvNeXt vs ResNetのアーキテクチャ比較実験
+
 ### exp008: ConvNeXt-style channel distribution
 **日付**: 2026-03-10
 **ベース実験**: exp001
 **改善内容**:
-- ConvNeXtのチャンネル分布を採用: depths=[2, 2, 9, 2], dims=[96, 192, 384, 768]
+- ConvNeXtのチャンネル分布を採用: depths=[1, 1, 3, 1], dims=[96, 192, 384, 768]
 - 4ステージ構成でチャンネル数を段階的に増加（96→192→384→768）
 - 各ブロックはdepthwise conv + LayerNorm + inverted bottleneck (×4) + GELUのConvNeXt構造
 - ステージ間はLayerNorm + 1x1 convでチャンネル数を変換（9x9盤面のため空間解像度は維持）

@@ -1,6 +1,6 @@
 """ConvNeXt-style channel distribution with staged architecture.
 
-depths=[2, 2, 9, 2], dims=[96, 192, 384, 768]
+depths=[1, 1, 3, 1], dims=[96, 192, 384, 768]
 
 4 stages with increasing channel widths and downsampling between stages.
 Each stage uses ConvNeXt-style blocks (depthwise conv, inverted bottleneck, GELU).
