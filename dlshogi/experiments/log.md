@@ -1,5 +1,15 @@
 # Experiment Log
 
+### exp012: Isotropic InceptionNeXt
+**日付**: 2026-03-11
+**ベース実験**: exp011
+**パラメータ数**: 6.6M
+**改善内容**:
+- ConvNeXtのdepthwise 3x3をInceptionNeXt式の4並列ブランチに変更
+- チャンネルを4等分し、identity / 3x3 / 1x9 / 9x1 の各depthwise convを並列適用
+- 1x9・9x1カーネルが将棋の飛車・香車の直線移動を1層で捉えるinductive biasを持つ
+- depths=[20], dims=[192]はexp011と同一構成で直接比較可能
+
 ### exp011: ConvNeXt flat deep (single-stage)
 **日付**: 2026-03-10
 **ベース実験**: exp010

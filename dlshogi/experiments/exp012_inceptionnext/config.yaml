@@ -1,0 +1,4 @@
+# exp012: Isotropic InceptionNeXt
+# depths=[20], dims=[192], kernels: 3x3 + 1x9 + 9x1 + identity
+model:
+  network: dlshogi.experiments.exp012_inceptionnext.model.PolicyValueNetwork
