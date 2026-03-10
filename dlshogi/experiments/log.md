@@ -1,5 +1,13 @@
 # Experiment Log
 
+### exp011: ConvNeXt flat deep (single-stage)
+**日付**: 2026-03-10
+**ベース実験**: exp010
+**パラメータ数**: 6.7M
+**改善内容**:
+- exp010（depths=[10], dims=[256]）からdepths=[20], dims=[192]に変更
+- より深く・より細いネットワークとの比較実験
+
 ### exp010: ConvNeXt flat (single-stage)
 **日付**: 2026-03-10
 **ベース実験**: exp008
