@@ -53,7 +53,11 @@ bash dlshogi/experiments/exp001_fewer_activations/run.sh --trainer.max_epochs=10
    ```bash
    bash dlshogi/experiments/expNNN_short_description/run.sh --debug
    ```
-7. Add an entry to `log.md` (newest first) including the trainable parameter count:
+7. Run the profiler to check computation cost:
+   ```bash
+   bash dlshogi/experiments/expNNN_short_description/profile.sh
+   ```
+8. Add an entry to `log.md` (newest first) including the trainable parameter count:
    ```markdown
    ### expNNN: 説明
    **日付**: YYYY-MM-DD
