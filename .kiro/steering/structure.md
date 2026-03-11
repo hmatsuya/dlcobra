@@ -80,6 +80,7 @@ Example:
 新しい実験を作成したら以下を実施する:
 1. デバッグモードで動作確認: `bash dlshogi/experiments/expNNN_.../run.sh --debug`
 2. モデルサマリーのTrainable paramsを確認し、`log.md`の`**パラメータ数**`に記載
+3. プロファイリングで計算コストを確認: `bash dlshogi/experiments/expNNN_.../profile.sh`
 
 ### Data Pipeline
 - Raw: CSA/KIF game records
