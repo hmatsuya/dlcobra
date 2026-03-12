@@ -1,0 +1,4 @@
+# exp013: Isotropic InceptionNeXt with expansion=2
+# depths=[20], dims=[192], MLP: 192→384→192 (vs exp012: 192→768→192)
+model:
+  network: dlshogi.experiments.exp013_inceptionnext_expansion2.model.PolicyValueNetwork
