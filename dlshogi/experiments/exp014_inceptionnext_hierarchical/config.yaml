@@ -1,0 +1,4 @@
+# exp014: Hierarchical InceptionNeXt
+# depths=[3, 3, 9, 3], dims=[64, 128, 192, 256]
+model:
+  network: dlshogi.experiments.exp014_inceptionnext_hierarchical.model.PolicyValueNetwork
