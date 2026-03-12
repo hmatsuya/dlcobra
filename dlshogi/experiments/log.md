@@ -1,5 +1,16 @@
 # Experiment Log
 
+### exp014: 階層型InceptionNeXt（Hierarchical）
+**日付**: 2026-03-12
+**ベース実験**: exp012
+**パラメータ数**: 3.1M
+**改善内容**:
+- 等幅（isotropic）設計から階層型（depths=[3,3,9,3], dims=[64,128,192,256]）に変更
+- ステージ間をLayerNorm+Linearでチャネル数を段階的に拡大（チャネル射影）
+- MLP expansion=2（exp013と同様）を採用
+- exp012比でパラメータ数約50%削減（6.1M→3.1M）、CUDA時間も27%削減（94ms→69ms）
+- depthwiseコンボリューションのコストは固定のまま、MLP FLOPsを大幅削減
+
 ### exp013: InceptionNeXt expansion=2
 **日付**: 2026-03-11
 **ベース実験**: exp012
