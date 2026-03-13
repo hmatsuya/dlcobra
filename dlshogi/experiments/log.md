@@ -1,5 +1,16 @@
 # Experiment Log
 
+### exp016: Focal Lossへの変更
+**日付**: 2026-03-13
+**ベース実験**: exp015
+**パラメータ数**: 3.7M
+**改善内容**:
+- ポリシーヘッドをCross Entropy→Focal Loss: FL(pt) = -α(1-pt)^γ * log(pt)
+- バリューヘッド（result/value両方）をBCE→Binary Focal Loss: BFL = α(1-pt)^γ * BCE
+- パラメータ: focal_alpha=0.25、focal_gamma=2.0（RetinaNet標準値）
+- `ptl.py`は無変更、`FocalModel`サブクラスを`ptl_focal.py`に実装（実験ディレクトリ内で完結）
+- ネットワーク構成はexp015と同一（InceptionNeXt depths=[10], dims=[192]）、CUDA時間: 48ms
+
 ### exp015: Isotropic InceptionNeXt、深さ半減
 **日付**: 2026-03-12
 **ベース実験**: exp012
