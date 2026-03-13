@@ -9,17 +9,26 @@ DeepLearningShogi/
 │   ├── data_loader.py          # HCPE/HDF5 data loading
 │   ├── lr_scheduler.py         # Custom learning rate schedulers
 │   ├── serializers.py          # Model save/load utilities
+│   ├── docs/                   # General documentation
+│   │   ├── README.md           # Documentation index
+│   │   ├── optimization_ideas.md  # Optimization strategies
+│   │   └── PROFILING_GUIDE.md  # Profiling guide
 │   ├── network/                # Neural network architectures
 │   │   ├── policy_value_network.py        # Network factory
 │   │   ├── policy_value_network_resnet.py # ResNet implementation
 │   │   ├── policy_value_network_senet.py  # SENet variant
 │   │   └── ...
 │   ├── experiments/            # Experiment directories
+│   │   ├── log.md              # Experiment log (all experiments)
 │   │   └── expNNN_description/ # Each experiment is a Python package
 │   │       ├── __init__.py
 │   │       ├── config.yaml     # Overrides base config
 │   │       ├── model.py        # Custom network (optional)
-│   │       └── run.sh          # Launch script
+│   │       ├── run.sh          # Launch script
+│   │       ├── profile.py      # Quick profiling (batch=128 default)
+│   │       ├── profile_detailed.py  # Detailed profiling (optional)
+│   │       └── docs/           # Experiment-specific docs (optional)
+│   │           └── README.md   # Profiling results, analysis
 │   └── utils/                  # Data conversion & analysis tools
 │       ├── csa_to_hcpe*.py     # CSA → HCPE converters
 │       ├── hcpe_to_hdf5.py     # HCPE → HDF5 converter
@@ -80,7 +89,9 @@ Example:
 新しい実験を作成したら以下を実施する:
 1. デバッグモードで動作確認: `bash dlshogi/experiments/expNNN_.../run.sh --debug`
 2. モデルサマリーのTrainable paramsを確認し、`log.md`の`**パラメータ数**`に記載
-3. プロファイリングで計算コストを確認: `bash dlshogi/experiments/expNNN_.../profile.sh`
+3. プロファイリングで計算コストを確認: `bash dlshogi/experiments/expNNN_.../profile.sh` (デフォルトbatch=128)
+4. (オプション) 詳細プロファイリング: `python dlshogi/experiments/expNNN_.../profile_detailed.py`
+5. (オプション) 有望な実験の場合、`docs/`フォルダに分析結果を保存
 
 ### Data Pipeline
 - Raw: CSA/KIF game records
