@@ -1,0 +1,4 @@
+# exp015: Isotropic InceptionNeXt, halved depth
+# depths=[10], dims=[192] (exp012 was depths=[20])
+model:
+  network: dlshogi.experiments.exp015_inceptionnext_depth10.model.PolicyValueNetwork

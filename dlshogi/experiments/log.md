@@ -1,8 +1,18 @@
 # Experiment Log
 
-### exp014: 階層型InceptionNeXt（Hierarchical）
+### exp015: Isotropic InceptionNeXt、深さ半減
 **日付**: 2026-03-12
 **ベース実験**: exp012
+**パラメータ数**: 3.7M
+**改善内容**:
+- exp012（depths=[20], dims=[192]）からdepthsを半減: depths=[10], dims=[192]
+- ブロック構成・MLP expansion=4はexp012と同一
+- パラメータ数はexp012の6.6M→3.7M（約44%削減）
+- 深さと精度のトレードオフを検証
+
+### exp014: 階層型InceptionNeXt（Hierarchical）
+**日付**: 2026-03-12
+**ベース実験**: exp013
 **パラメータ数**: 3.1M
 **改善内容**:
 - 等幅（isotropic）設計から階層型（depths=[3,3,9,3], dims=[64,128,192,256]）に変更
