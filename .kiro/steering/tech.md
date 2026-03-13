@@ -45,6 +45,15 @@ bash dlshogi/experiments/exp001_fewer_activations/run.sh
 bash dlshogi/experiments/exp001_fewer_activations/run.sh --debug
 ```
 
+### Inference Optimization
+```bash
+# Benchmark with torch.compile (1.2-1.3x speedup, exp017)
+python dlshogi/experiments/exp017_torch_compile/benchmark_optimizations.py
+
+# For production: Export to ONNX (additional 2-3x speedup with TensorRT)
+python dlshogi/convert_model_to_onnx.py <model_path> <output_path>
+```
+
 ### Model Export
 ```bash
 python dlshogi/convert_model_to_onnx.py <model_path> <output_path>
@@ -55,6 +64,24 @@ python dlshogi/convert_model_to_onnx.py <model_path> <output_path>
 cd cppshogi && make
 cd usi && make
 ```
+
+## Inference Optimization
+
+### torch.compile (推奨)
+PyTorch 2.0+のJITコンパイラによる推論高速化:
+- 速度: 1.22-1.30x高速化（exp017で検証済み）
+- 精度: 変化なし
+- 使用方法:
+```python
+model = PolicyValueNetwork().to(device).eval()
+model = torch.compile(model, mode="reduce-overhead")
+```
+
+### ONNX + TensorRT (本番デプロイ)
+更なる高速化が必要な場合:
+- 速度: torch.compile比で更に2-3x高速化
+- 合計: ベースラインから約3-4x高速化
+- FP16精度で実行可能
 
 ## Configuration
 - Training config: `dlshogi/config.yaml` (YAML, LightningCLI format)

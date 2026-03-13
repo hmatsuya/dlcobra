@@ -4,6 +4,21 @@ This directory contains general documentation for the DeepLearningShogi project.
 
 ## Files
 
+### [TORCH_COMPILE_GUIDE.md](TORCH_COMPILE_GUIDE.md)
+Guide to using torch.compile for 1.2-1.3x inference speedup.
+
+**Contents:**
+- Quick start examples
+- Benchmark results from exp017
+- When to use torch.compile
+- Integration with profiling scripts
+- Combining with ONNX + TensorRT
+- Troubleshooting
+
+**When to read:** Before profiling experiments or deploying models for inference.
+
+---
+
 ### [optimization_ideas.md](optimization_ideas.md)
 Research-backed optimization strategies for improving accuracy and inference speed.
 
