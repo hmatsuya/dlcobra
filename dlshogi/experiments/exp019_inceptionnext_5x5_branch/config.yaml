@@ -1,0 +1,5 @@
+# exp019: InceptionNeXt with 5x5 depthwise branch
+# depths=[10], dims=[190] (divisible by 5)
+# 5 parallel branches: identity, 3x3, 1x9, 9x1, 5x5
+model:
+  network: dlshogi.experiments.exp019_inceptionnext_5x5_branch.model.PolicyValueNetwork

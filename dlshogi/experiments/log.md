@@ -1,5 +1,17 @@
 # Experiment Log
 
+### exp019: InceptionNeXt with 5x5 Depthwise Branch
+**日付**: 2026-03-14
+**ベース実験**: exp015
+**パラメータ数**: 3.6M
+**改善内容**:
+- InceptionNeXtブロックを4並列→5並列に拡張（5x5 depthwise convを追加）
+- チャンネル分割: dim // 5 each for identity, 3x3, 1x9, 9x1, 5x5
+- 5x5ブランチが桂馬のL字ジャンプ・角の斜め移動を1層で捉える
+- dims=[190]（5で割り切れる必要があるため192→190に変更）
+- depthwiseのためFLOP増加は微小、受容野は大幅に拡大
+- 推論速度: 9.5ms（exp015: 7.8ms、1.22x遅い、batch=128）
+
 ### exp018: Lighter Value Head (2 channels)
 **日付**: 2026-03-14
 **ベース実験**: exp015
