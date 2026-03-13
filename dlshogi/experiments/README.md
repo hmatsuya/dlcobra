@@ -8,13 +8,22 @@ Use underscores (not hyphens) so the folder is importable as a Python module.
 ```
 dlshogi/
 ├── config.yaml                # shared base config (all experiments inherit from this)
+├── docs/                      # general documentation
+│   ├── README.md              # documentation index
+│   ├── optimization_ideas.md  # optimization strategies
+│   └── PROFILING_GUIDE.md     # profiling guide
 └── experiments/
     ├── __init__.py
+    ├── log.md                 # experiment log (all experiments)
     ├── exp001_fewer_activations/
     │   ├── __init__.py
     │   ├── model.py           # experiment-specific network (optional)
     │   ├── config.yaml        # only overrides vs base config.yaml
     │   ├── run.sh             # launch script
+    │   ├── profile.py         # quick profiling (batch=128 default)
+    │   ├── profile_detailed.py # detailed profiling (optional)
+    │   ├── docs/              # experiment-specific documentation (optional)
+    │   │   └── README.md      # profiling results, analysis
     │   └── fit.log            # training log (generated)
     └── exp002_xxx/
         ├── config.yaml
@@ -53,7 +62,7 @@ bash dlshogi/experiments/exp001_fewer_activations/run.sh --trainer.max_epochs=10
    ```bash
    bash dlshogi/experiments/expNNN_short_description/run.sh --debug
    ```
-7. Run the profiler to check computation cost:
+7. Run the profiler to check computation cost (uses batch=128 by default):
    ```bash
    bash dlshogi/experiments/expNNN_short_description/profile.sh
    ```
@@ -66,5 +75,10 @@ bash dlshogi/experiments/exp001_fewer_activations/run.sh --trainer.max_epochs=10
    **改善内容**:
    - ...
    ```
+9. (Optional) For detailed profiling and analysis:
+   ```bash
+   python dlshogi/experiments/expNNN_short_description/profile_detailed.py
+   ```
+   Save results in `docs/` folder if experiment shows promise.
 
 LightningCLI stacks configs: later `--config` files override earlier ones.

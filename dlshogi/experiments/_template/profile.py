@@ -15,7 +15,7 @@ from torch.profiler import ProfilerActivity, profile, record_function
 from dlshogi.common import FEATURES1_NUM, FEATURES2_NUM
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--batch-size", type=int, default=32)
+parser.add_argument("--batch-size", type=int, default=128)  # Default matches search batch size
 parser.add_argument("--runs", type=int, default=20)
 args = parser.parse_args()
 
