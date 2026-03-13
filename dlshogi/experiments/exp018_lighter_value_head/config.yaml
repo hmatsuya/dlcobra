@@ -1,0 +1,4 @@
+# exp018: Lighter Value Head (2 channels instead of 27)
+# Based on exp015, reduces value head parameters by ~500k
+model:
+  network: dlshogi.experiments.exp018_lighter_value_head.model.PolicyValueNetwork

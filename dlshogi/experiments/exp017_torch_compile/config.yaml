@@ -1,0 +1,5 @@
+# exp017: PyTorch Compiler & Memory Layout Optimization
+# Same architecture as exp015 (depths=[10], dims=[192])
+# Testing torch.compile + channels_last memory format
+model:
+  network: dlshogi.experiments.exp017_torch_compile.model.PolicyValueNetwork

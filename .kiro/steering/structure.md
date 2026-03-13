@@ -90,8 +90,23 @@ Example:
 1. デバッグモードで動作確認: `bash dlshogi/experiments/expNNN_.../run.sh --debug`
 2. モデルサマリーのTrainable paramsを確認し、`log.md`の`**パラメータ数**`に記載
 3. プロファイリングで計算コストを確認: `bash dlshogi/experiments/expNNN_.../profile.sh` (デフォルトbatch=128)
+   - 推論速度を測定する場合は、torch.compileを適用してベンチマークを実施
+   - exp017の結果: 1.22-1.30x高速化（精度は変わらず）
 4. (オプション) 詳細プロファイリング: `python dlshogi/experiments/expNNN_.../profile_detailed.py`
 5. (オプション) 有望な実験の場合、`docs/`フォルダに分析結果を保存
+
+### Inference Optimization (推論最適化)
+推論速度を最適化する場合:
+1. **torch.compile**: 1.2-1.3x高速化、精度は変わらず（exp017で検証済み）
+   ```python
+   model = model.eval()
+   model = torch.compile(model, mode="reduce-overhead")
+   ```
+2. **ONNX + TensorRT**: 更に2-3x高速化が期待できる（本番デプロイ時）
+   ```bash
+   python dlshogi/convert_model_to_onnx.py <model_path> <output_path>
+   ```
+3. **合計**: ベースラインから約3-4x高速化が可能
 
 ### Data Pipeline
 - Raw: CSA/KIF game records

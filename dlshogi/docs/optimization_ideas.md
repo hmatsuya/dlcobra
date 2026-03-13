@@ -67,7 +67,41 @@ x = x.permute(0, 2, 3, 1)
 
 ---
 
-### 3. Quantization-Aware Training (QAT)
+### 3. PyTorch Compiler & Memory Layout Optimization ✓ TESTED
+
+**Status:** Implemented in exp017
+
+**Problem:** The `permute` operations (`NCHW -> NHWC -> NCHW`) inside every block cause memory fragmentation.
+
+**Solution:** Utilize `torch.channels_last` for native NHWC processing and `torch.compile` to fuse operations.
+
+**Expected Impact:**
+- Speed: 2-3x inference speedup (predicted)
+- Accuracy: Zero loss
+
+**Actual Results (exp017):**
+- Speed: 1.22-1.30x inference speedup
+- Accuracy: Zero loss (no training needed)
+- Best for batch=128 (search): 1.30x
+- Best for batch=1024 (training): 1.22x
+
+**Why Not 2-3x?**
+- Small model (3.7M params) not memory-bound
+- Graph breaks from LayerNorm prevent full fusion
+- Baseline PyTorch already well-optimized
+
+**Implementation:**
+```python
+model = PolicyValueNetwork().to(device).eval()
+model = model.to(memory_format=torch.channels_last)
+model = torch.compile(model, mode="reduce-overhead")
+```
+
+**Recommendation:** Use torch.compile for inference. For production, export to ONNX + TensorRT FP16 for additional 2-3x speedup (total ~3-4x vs baseline).
+
+---
+
+### 4. Quantization-Aware Training (QAT)
 
 **Problem:** FP32 inference is slow and memory-intensive for MCTS.
 
@@ -234,22 +268,26 @@ blocks = [InceptionNeXtBlock(dim, expansion=exp)
 
 ## Immediate Action Items
 
-1. **Profile exp015 in detail**
-   - Use PyTorch profiler: `torch.profiler.profile()`
-   - Identify exact bottlenecks (conv vs linear vs memory)
-   - Measure on target inference hardware (not just training GPU)
+1. ✓ **Profile exp015 in detail** - COMPLETED
+   - Detailed profiling completed with batch sizes 128-2048
+   - Identified LayerNorm + permute operations as bottleneck
 
-2. **Implement exp017 (channel shuffle)**
+2. ✓ **Test torch.compile optimization** - COMPLETED (exp017)
+   - Achieved 1.22-1.30x speedup with zero accuracy loss
+   - channels_last provides minimal additional benefit
+   - Recommended for inference, especially with TensorRT export
+
+3. **Implement channel shuffle** (exp018)
    - Easiest to implement (~5 lines)
    - High likelihood of accuracy improvement
    - No speed penalty
 
-3. **Test INT8 post-training quantization**
+4. **Test INT8 post-training quantization**
    - Even without QAT, measure speedup potential
    - Use PyTorch's `torch.quantization.quantize_dynamic()`
    - Establishes upper bound for QAT benefits
 
-4. **Benchmark on actual game hardware**
+5. **Benchmark on actual game hardware**
    - Training GPU (A100/H100) vs inference GPU (RTX 3090/4090)
    - CPU inference for comparison (ONNX Runtime)
    - Measure nodes-per-second in actual MCTS

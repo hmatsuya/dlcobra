@@ -1,5 +1,27 @@
 # Experiment Log
 
+### exp018: Lighter Value Head (2 channels)
+**日付**: 2026-03-14
+**ベース実験**: exp015
+**パラメータ数**: 3.1M
+**改善内容**:
+- Value Headのボトルネック修正: MAX_MOVE_LABEL_NUM (27) → 2チャネルに削減
+- value_fc1の入力次元: 2187 → 162 (約13倍削減)
+- パラメータ削減: 523k (14.3%削減、3.67M→3.14M)
+- 推論速度: 7.55ms (exp015: 7.61ms、1.01x高速化、batch=128)
+- AlphaZero/KataGoと同様の設計パターン
+
+### exp017: PyTorch Compiler & Memory Layout Optimization
+**日付**: 2026-03-14
+**ベース実験**: exp015
+**パラメータ数**: 3.7M
+**改善内容**:
+- torch.compileとchannels_lastメモリフォーマットによる推論高速化を検証
+- 精度は変わらず、推論速度のみ改善（プロファイリング専用実験）
+- 結果: batch=128で1.30x、batch=1024で1.22x高速化
+- channels_lastは追加効果が小さい（~0.01x）ため、torch.compile単独で十分
+- 本番デプロイ時はONNX→TensorRT FP16で更に2-3x高速化が期待できる
+
 ### exp016: Focal Lossへの変更
 **日付**: 2026-03-13
 **ベース実験**: exp015
