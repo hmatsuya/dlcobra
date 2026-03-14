@@ -1,5 +1,18 @@
 # Experiment Log
 
+### exp021: InceptionNeXt + Squeezeformer tail block
+**日付**: 2026-03-14
+**ベース実験**: exp015
+**パラメータ数**: 4.3M
+**改善内容**:
+- exp015の最後のInceptionNeXtブロックをSqueezeformerブロック（NeurIPS 2022）に置換
+- 構成: 9 InceptionNeXtブロック + 1 Squeezeformerブロック
+- Squeezeformerブロック: MHA+LN → FFN+LN → ConvModule+LN → FFN+LN（全て残差接続付き）
+- 9×9盤面をseq_len=81に平坦化し、相対位置エンコーディング付きMHAで大域的な駒の関係を捉える
+- 局所特徴抽出（InceptionNeXt）→ 大域的注意機構（Squeezeformer）のハイブリッド設計
+- 初回実行でval/loss=nanが発生。原因: 16-mixed (FP16)でattentionスコアがオーバーフロー（FP16の最大値65504を超過）
+- 対策: precision を bf16-mixed に変更（BF16はFP32と同じ指数部8bitで動的範囲が広い）
+
 ### exp020: Adaptive MLP Expansion Ratios
 **日付**: 2026-03-14
 **ベース実験**: exp015

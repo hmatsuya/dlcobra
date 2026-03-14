@@ -1,0 +1,7 @@
+# exp021: InceptionNeXt + Squeezeformer tail block
+# 9 InceptionNeXt blocks + 1 Squeezeformer block (replaces last InceptionNeXt)
+# Based on exp015 (depths=[10], dims=[192])
+trainer:
+  precision: bf16-mixed
+model:
+  network: dlshogi.experiments.exp021_squeezeformer_tail.model.PolicyValueNetwork
