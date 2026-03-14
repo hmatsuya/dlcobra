@@ -1,5 +1,16 @@
 # Experiment Log
 
+### exp020: Adaptive MLP Expansion Ratios
+**日付**: 2026-03-14
+**ベース実験**: exp015
+**パラメータ数**: 3.4M
+**改善内容**:
+- MLP expansion ratioをブロック深さに応じて可変化（3:6:3配分、12ブロック）
+- expansions=[2,2,2,3,3,3,3,3,3,4,4,4]
+- 早期(1-3): expansion=2、核心(4-9): expansion=3、後期(10-12): expansion=4
+- EfficientNetのcompound scalingに着想、深さに応じた容量配分で効率改善を狙う
+- 推論速度: 8.0ms（batch=128）、exp015比でブロック数1.2倍、パラメータ数は8%削減(3.4M vs 3.7M)
+
 ### exp019: InceptionNeXt with 5x5 Depthwise Branch
 **日付**: 2026-03-14
 **ベース実験**: exp015
