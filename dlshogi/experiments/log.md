@@ -1,5 +1,17 @@
 # Experiment Log
 
+### exp022: InceptionNeXt + plain self-attention tail block
+**日付**: 2026-03-14
+**ベース実験**: exp021 / exp015
+**パラメータ数**: 3.8M
+**改善内容**:
+- exp021のSqueezeformerブロックを最小限のplain self-attentionブロックに置換
+- 構成: 9 InceptionNeXtブロック + 1 plain attentionブロック（MHA + FFN、pre-norm）
+- 位置エンコーディングなし: 9層のconv特徴量が既に空間情報を保持しているため不要と判断
+- exp021比でパラメータ数削減（4.3M→3.8M）、RelPosEnc・ConvModule・dual FFNを除去
+- softmax attentionによる鋭い注意分布が盤面ゲームに適している（少数の重要マスに集中）
+- 推論速度: 8.2ms（exp015: 7.8ms、1.05x遅い、batch=128）— exp021の10.7msから大幅改善
+
 ### exp021: InceptionNeXt + Squeezeformer tail block
 **日付**: 2026-03-14
 **ベース実験**: exp015
