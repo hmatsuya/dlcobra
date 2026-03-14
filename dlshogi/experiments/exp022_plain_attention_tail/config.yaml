@@ -1,0 +1,5 @@
+# exp022: InceptionNeXt + plain self-attention tail block (no positional encoding)
+# 9 InceptionNeXt blocks + 1 plain attention block
+# Based on exp021 (Squeezeformer tail) / exp015 (depths=[10], dims=[192])
+model:
+  network: dlshogi.experiments.exp022_plain_attention_tail.model.PolicyValueNetwork
