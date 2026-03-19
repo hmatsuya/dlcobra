@@ -150,12 +150,17 @@ class Hdf5DataLoader(DataLoader):
         return self.mini_batch(self.data[indices].compute())
 
     def pre_fetch(self):
-        hcpevec = self.data[self.i : self.i + self.batch_size].compute()
+        start = self.i
+        end = self.i + self.batch_size
         self.i += self.batch_size
-        if len(hcpevec) < self.batch_size:
+        if end > len(self.data):
             return
 
-        self.f = self.executor.submit(self.mini_batch, hcpevec)
+        def _load_and_decode():
+            hcpevec = self.data[start:end].compute()
+            return self.mini_batch(hcpevec)
+
+        self.f = self.executor.submit(_load_and_decode)
 
     def __iter__(self):
         self.i = 0

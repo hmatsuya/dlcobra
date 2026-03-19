@@ -249,6 +249,7 @@ class Model(pl.LightningModule):
         use_swa=False,
         swa_start_epoch=10,
         swa_lr=1e-4,
+        compile_model=False,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -256,6 +257,8 @@ class Model(pl.LightningModule):
         if resume_model:
             checkpoint = torch.load(resume_model, map_location="cpu")
             self.model.load_state_dict(checkpoint["model"])
+        if compile_model:
+            self.model = torch.compile(self.model)
         if use_ema:
             self.ema_model = AveragedModel(
                 self.model, multi_avg_fn=get_ema_multi_avg_fn(ema_decay)
