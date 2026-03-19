@@ -1,5 +1,16 @@
 # Experiment Log
 
+### exp023: InceptionNeXt deep512 + plain attention tail
+**日付**: 2026-03-15
+**ベース実験**: exp022
+**パラメータ数**: 86.1M
+**改善内容**:
+- exp022のアーキテクチャをスケールアップ: depths=[10]→[40], dims=[192]→[512]
+- 構成: 39 InceptionNeXtブロック + 1 plain attentionブロック
+- パラメータ数: 3.8M→86.1M（約22.7倍）
+- 訓練時batch=1024ではOOM（24GB GPU）、batch=512で動作確認済み
+- 推論速度: 165.6ms（batch=128）— exp022の8.2msから約20倍遅い
+
 ### exp022: InceptionNeXt + plain self-attention tail block
 **日付**: 2026-03-14
 **ベース実験**: exp021 / exp015
