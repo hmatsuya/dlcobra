@@ -25,6 +25,7 @@ DeepLearningShogi/
 │   │       ├── config.yaml     # Overrides base config
 │   │       ├── model.py        # Custom network (optional)
 │   │       ├── run.sh          # Launch script
+│   │       ├── resume.sh      # Resume from last checkpoint
 │   │       ├── profile.py      # Quick profiling (batch=128 default)
 │   │       ├── profile_detailed.py  # Detailed profiling (optional)
 │   │       └── docs/           # Experiment-specific docs (optional)
