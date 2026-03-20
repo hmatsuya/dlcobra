@@ -20,6 +20,7 @@ dlshogi/
     │   ├── model.py           # experiment-specific network (optional)
     │   ├── config.yaml        # only overrides vs base config.yaml
     │   ├── run.sh             # launch script
+    │   ├── resume.sh          # resume from last checkpoint
     │   ├── profile.py         # quick profiling (batch=128 default)
     │   ├── profile_detailed.py # detailed profiling (optional)
     │   ├── docs/              # experiment-specific documentation (optional)
@@ -45,6 +46,11 @@ bash dlshogi/experiments/exp001_fewer_activations/run.sh --debug
 Extra CLI overrides:
 ```bash
 bash dlshogi/experiments/exp001_fewer_activations/run.sh --trainer.max_epochs=10
+```
+
+Resume from last checkpoint (e.g. after early stopping):
+```bash
+bash dlshogi/experiments/exp001_fewer_activations/resume.sh
 ```
 
 ## Creating a new experiment
