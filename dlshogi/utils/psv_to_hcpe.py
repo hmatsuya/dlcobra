@@ -1,55 +1,91 @@
+"""Convert YaneuraOu PSV (.bin) files to HCPE format.
+
+Uses C extension sfen_unpack_c for fast YaneuraOu packed SFEN decoding,
+then cshogi to re-encode as HCP (Apery/dlshogi format).
+Processes in chunks to handle large files without excessive memory use.
+"""
 from cshogi import *
 import numpy as np
-
 import argparse
+import sys
+import os
+import time
 
-parser = argparse.ArgumentParser()
-parser.add_argument('psv')
-parser.add_argument('hcpe')
-args = parser.parse_args()
+sys.path.insert(0, os.path.dirname(__file__))
+from sfen_unpack_c import unpack_batch
 
-psvs = np.fromfile(args.psv, dtype=PackedSfenValue)
-hcpes = np.zeros(len(psvs), dtype=HuffmanCodedPosAndEval)
 
-print(f'input num = {len(psvs)}')
+def main():
+    parser = argparse.ArgumentParser(description='Convert YaneuraOu PSV to HCPE')
+    parser.add_argument('psv', help='Input PSV (.bin) file')
+    parser.add_argument('hcpe', help='Output HCPE file')
+    parser.add_argument('--chunk-size', type=int, default=100000,
+                        help='Records per chunk (default: 100000)')
+    args = parser.parse_args()
 
-board = Board()
-num_positions = 0
-for index, (psv, hcpe) in enumerate(zip(psvs, hcpes)):
-    try:
-        if not board.set_psfen(psv['sfen']):
-            raise ValueError('failed to set sfen')
-        if not board.is_ok():
-            raise ValueError('board is not ok')
-        hcpe['eval'] = psv['score']
-        board.to_hcp(hcpe['hcp'])
+    total = os.path.getsize(args.psv) // np.dtype(PackedSfenValue).itemsize
+    if total == 0:
+        print('input num = 0, skipping')
+        sys.exit(1)
 
-        if not isinstance(hcpe['eval'], int):
-            raise ValueError('eval is not int')
-        
-        hcpe['bestMove16'] = move16_from_psv(psv['move'])
-        if not isinstance(hcpe['bestMove16'], int):
-            raise ValueError('bestMove16 is not int')
-        move = board.move_from_move16(hcpe['bestMove16'])
-        if not board.is_legal(move):
-            raise ValueError('illegal move')
+    print(f'input num = {total}')
+    print(f'chunk_size = {args.chunk_size}')
 
-        game_result = psv['game_result']
-        # gameResult -> 0: DRAW, 1: BLACK_WIN, 2: WHITE_WIN
-        if game_result == 1:
-            hcpe['gameResult'] = board.turn + 1
-        elif game_result == -1:
-            hcpe['gameResult'] = 2 - board.turn
-        if hcpe['gameResult'] not in [0, 1, 2]:
-            raise ValueError('gameResult is not 0, 1, 2')
+    psvs = np.memmap(args.psv, dtype=PackedSfenValue, mode='r')
+    board = Board()
+    total_ok = 0
+    total_err = 0
+    t0 = time.time()
 
-        num_positions += 1
-    except(Exception) as e:
-        print(index, e, psv)
-        # np.delete(hcpes, num_positions, axis=0)
+    with open(args.hcpe, 'wb') as f_out:
+        for start in range(0, total, args.chunk_size):
+            end = min(start + args.chunk_size, total)
+            chunk = np.array(psvs[start:end])  # copy to memory
 
-print(f'position num = {num_positions}')
-print(f'output num = {len(hcpes)}')
-print(f'error rate = {1 - num_positions / len(psvs)}')
+            # Batch unpack YaneuraOu packed SFENs to SFEN strings
+            sfen_list = unpack_batch(chunk['sfen'].tobytes())
 
-hcpes.tofile(args.hcpe)
+            hcpes = np.zeros(len(chunk), dtype=HuffmanCodedPosAndEval)
+            num_ok = 0
+
+            for j in range(len(chunk)):
+                sfen = sfen_list[j]
+                if sfen is None:
+                    total_err += 1
+                    continue
+                try:
+                    board.set_sfen(sfen)
+                    hcpe = hcpes[num_ok]
+                    board.to_hcp(hcpe['hcp'])
+                    hcpe['eval'] = chunk[j]['score']
+                    hcpe['bestMove16'] = move16_from_psv(chunk[j]['move'])
+                    gr = chunk[j]['game_result']
+                    if gr == 1:
+                        hcpe['gameResult'] = board.turn + 1
+                    elif gr == -1:
+                        hcpe['gameResult'] = 2 - board.turn
+                    num_ok += 1
+                except Exception:
+                    total_err += 1
+
+            hcpes[:num_ok].tofile(f_out)
+            total_ok += num_ok
+
+            elapsed = time.time() - t0
+            done = end
+            rate = done / elapsed if elapsed > 0 else 0
+            eta = (total - done) / rate if rate > 0 else 0
+            print(f'  [{done}/{total}] {rate:.0f} rec/s, '
+                  f'ok={total_ok}, err={total_err}, '
+                  f'ETA={eta/60:.1f}min', flush=True)
+
+    elapsed = time.time() - t0
+    print(f'position num = {total_ok}')
+    print(f'error num = {total_err}')
+    if total > 0:
+        print(f'error rate = {total_err / total:.6f}')
+    print(f'time = {elapsed:.1f}s ({total / elapsed:.0f} rec/s)')
+
+
+if __name__ == '__main__':
+    main()
