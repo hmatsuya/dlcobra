@@ -1,5 +1,16 @@
 # Experiment Log
 
+### exp024: exp023 deep512 + haoデータセットで継続学習 ❌失敗
+**日付**: 2026-03-27
+**ベース実験**: exp023
+**パラメータ数**: 86.1M
+**改善内容**:
+- exp023のベストチェックポイント（val/loss=2.111, step=71250）からhaoデータセット（287GB, 17ファイル）で継続学習
+- OOM回避のため1エポックにつき1ファイルずつ読み込むカスタムHcpeDataModuleを実装
+- accumulate_grad_batches=8、batch_size=512、torch.compile有効
+- 結果: val/loss=8.342に爆発し完全に失敗。exp023の2.111から大幅に悪化
+- 原因: データドメインの違い、またはLRスケジューラのリセットによる学習率の不整合が疑われる
+
 ### exp023: InceptionNeXt deep512 + plain attention tail
 **日付**: 2026-03-15
 **ベース実験**: exp022
