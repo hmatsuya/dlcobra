@@ -1,0 +1,46 @@
+# exp024: Continue exp023 (InceptionNeXt deep512) with hao dataset
+# Resume from exp023 best checkpoint (val/loss=2.111, step=71250)
+# New training data: /mnt/nvme1n1p2/data/hao/*.hcpe (287GB, 17 files)
+# Loads one HCPE file per epoch to avoid OOM
+trainer:
+  accumulate_grad_batches: 8
+  max_epochs: 17
+  reload_dataloaders_every_n_epochs: 1
+  callbacks:
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      monitor: val/loss
+      save_last: true
+      save_top_k: 5
+      mode: min
+      save_on_train_epoch_end: false
+  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+  - class_path: lightning.pytorch.callbacks.EarlyStopping
+    init_args:
+      monitor: val/loss
+      patience: 20
+      min_delta: 0.0001
+      mode: min
+      verbose: true
+model:
+  network: dlshogi.experiments.exp023_inceptionnext_deep512.model.PolicyValueNetwork
+  compile_model: true
+  resume_model: experiments/exp024_deep512_hao_data/exp023_best.pt
+data:
+  train_files:
+  - /mnt/nvme1n1p2/data/hao/shuffled_*.hcpe
+  val_files:
+  - /mnt/nvme1n1p2/data/shogi-ai-book/floodgate_test_2017-2018_r3500_eval5000.hcpe
+  batch_size: 512
+  val_batch_size: 512
+lr_scheduler:
+  class_path: dlshogi.lr_scheduler.CosineLRScheduler
+  init_args:
+    t_initial: 300000
+    warmup_t: 1000
+    cycle_limit: 1
+    warmup_prefix: true
+optimizer:
+  class_path: torch.optim.AdamW
+  init_args:
+    weight_decay: 0.001
