@@ -1,5 +1,16 @@
 # Experiment Log
 
+### exp025: DropPath + bf16-mixed + gradient clipping
+**日付**: 2026-03-28
+**ベース実験**: exp023
+**パラメータ数**: 86.1M
+**改善内容**:
+- exp023のベストチェックポイント（val/loss=2.111, step=71250）から継続学習
+- DropPath（stochastic depth）を全残差ブロックに追加: 線形スケジュール 0→0.2
+- precision: 16-mixed → bf16-mixed（attention overflowの防止、exp021で検証済み）
+- gradient_clip_val: 1.0を追加（突然のloss崩壊を防止）
+- DropPathは深いブロックほど高い確率でスキップし、構造的過学習を抑制
+
 ### exp024: exp023 deep512 + haoデータセットで継続学習 ❌失敗
 **日付**: 2026-03-27
 **ベース実験**: exp023
