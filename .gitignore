@@ -265,3 +265,7 @@ model/
 
 [Dd]ownload/
 .venv/
+
+# PyTorch model checkpoints
+*.pt
+*.ckpt
