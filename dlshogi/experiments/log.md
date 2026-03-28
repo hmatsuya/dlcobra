@@ -1,6 +1,15 @@
 # Experiment Log
 
-### exp025: DropPath + bf16-mixed + gradient clipping
+### exp026: DropPath + bf16-mixed + grad clip（ゼロから学習）
+**日付**: 2026-03-28
+**ベース実験**: exp025
+**パラメータ数**: 86.1M
+**改善内容**:
+- exp025と同一アーキテクチャ・設定だが、チェックポイントなしでゼロから学習
+- exp025（exp023ベストから継続）が失敗したため、DropPath導入時はゼロからの学習が必要と判断
+- DropPath 0→0.2線形スケジュール、bf16-mixed、gradient_clip_val=1.0
+
+### exp025: DropPath + bf16-mixed + gradient clipping ❌失敗
 **日付**: 2026-03-28
 **ベース実験**: exp023
 **パラメータ数**: 86.1M
