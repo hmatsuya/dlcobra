@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "pdf-reader": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@sylphx/pdf-reader-mcp"
+      ],
+      "disabled": false,
+      "autoApprove": [
+        "read_pdf"
+      ]
+    },
+    "tavily": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://mcp.tavily.com/mcp/?tavilyApiKey=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"
+      ],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
