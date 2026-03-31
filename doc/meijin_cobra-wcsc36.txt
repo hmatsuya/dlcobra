@@ -1,0 +1,117 @@
+名人コブラ　アピール文書
+第36回世界コンピュータ将棋選手権
+
+■ 概要
+
+名人コブラは、山岡氏のDeepLearningShogi（dlshogi）をベースとした将棋エンジンです。
+本年は思考部のニューラルネットワークアーキテクチャを独自に設計・実装しました。
+
+■ ベースソフトウェア
+
+- DeepLearningShogi（dlshogi）: https://github.com/TadaoYamaoka/DeepLearningShogi
+- 探索部: dlshogiのMCTS探索をそのまま使用
+- 学習基盤: PyTorch + PyTorch Lightning（LightningCLI）
+- 推論最適化: torch.compile + ONNX/TensorRT
+
+■ 思考部における独自の工夫
+
+1. InceptionNeXtアーキテクチャの将棋への適用
+
+  ベースのdlshogiが採用するResNet（3x3畳み込みの積み重ね）に代えて、
+  InceptionNeXt [Yu+ CVPR2024] を将棋の9x9盤面向けに改変したアーキテクチャを
+  独自に設計しました。
+
+  InceptionNeXtブロックでは、チャネルを4等分し、以下の4並列depthwise畳み込みを
+  適用します:
+
+    チャネル1: Identity（直通パス）
+    チャネル2: 3x3 depthwise conv（近接する駒の関係を捉える）
+    チャネル3: 1x9 depthwise conv（横方向＝段の全域を1層で捉える）
+    チャネル4: 9x1 depthwise conv（縦方向＝筋の全域を1層で捉える）
+
+  各ブランチの出力はconcatで結合し、元のチャネル数に戻します。
+
+  将棋の盤面は9x9であるため、カーネルサイズ9の畳み込みは1層で段・筋の全域を
+  カバーします。これは飛車・香車などの直線的に動く駒（走り駒）の利きを
+  1層で直接モデル化できる構造的な事前知識となっています。
+
+  なお、同様に9x1/1x9カーネルを用いるRyfamateのC-Layerでは、カーネルが
+  段・筋方向に移動しないため重みが盤面上の絶対位置に依存し、入玉形のような
+  位置依存の局面認識に有利な性質を持ちます。一方、本実装のdepthwise convは
+  通常の畳み込みであり重みは位置非依存です。
+
+  各ブロックのMLP部分は LayerNorm → Linear(dim, 4*dim) → GELU → Linear(4*dim, dim)
+  の構成です。正規化にLayerNorm、活性化関数にGELUを使用し、
+  ベースのResNetのBatchNorm + ReLUから変更しています。
+
+2. Transformer末尾ブロック（ハイブリッド設計）
+
+  ネットワーク末尾の1ブロックをTransformerブロックに置換しました。
+  構成は以下の通りです:
+
+    Pre-LayerNorm → Multi-Head Attention (8 heads) → 残差接続
+    Pre-LayerNorm → FFN (GELU) → 残差接続
+
+  9x9盤面をseq_len=81に平坦化し、位置エンコーディングなしで適用します。
+  39層のInceptionNeXtブロックで抽出された局所特徴量が既に十分な空間情報を
+  保持しているため、位置エンコーディングは不要と判断しました。
+
+  この設計の意図は、InceptionNeXtの局所的・軸方向の特徴抽出の後に、
+  self-attentionによる大域的な駒の関係性の捕捉を加えることです。
+  softmax attentionの鋭い注意分布は、盤面上の少数の重要なマスに
+  集中する将棋の特性に適しています。
+
+3. DropPath（Stochastic Depth）による正則化
+
+  全40ブロックの残差接続にDropPathを導入しました。
+  ドロップ確率は浅い層から深い層へ線形にスケジュールします（0 → 0.2）。
+  深いブロックほど高い確率でスキップされ、構造的な過学習を抑制します。
+
+4. 学習の安定化
+
+  - bf16-mixed精度: FP16ではattentionスコアがオーバーフロー（FP16最大値65504超過）
+    する問題が発生したため、BF16（FP32と同じ指数部8bit）を採用
+  - Gradient Clipping (max_norm=1.0): 学習中のloss崩壊を防止
+  - AdamW (weight_decay=0.001) + Cosine Annealing LR (warmup 1000 steps)
+
+■ ネットワーク構成の詳細
+
+  - 入力: 盤面特徴62ch (9x9) + 持ち駒等57ch (9x9)
+  - Stem: Conv2d(62ch→512ch, 3x3) + Conv2d(57ch→512ch, 1x1) → 加算 → LayerNorm
+  - 本体: InceptionNeXtブロック × 39 + Transformerブロック × 1
+  - チャネル数: 512（全層均一、isotropic設計）
+  - Policy Head: Conv2d(512→27, 1x1) → flatten + bias → 2187次元（27方向×81マス）
+  - Value Head: Conv2d(512→27, 1x1) → LayerNorm → GELU → FC(2187→256) → GELU → FC(256→1)
+  - パラメータ数: 約86.1M
+  - 学習: PyTorch Lightning + torch.compile, batch_size=512, accumulate_grad_batches=8
+  - 学習データ: 水匠作者のたややん氏が公開しているデータセットを主に使用
+
+■ 擬似コード
+
+  # InceptionNeXtブロック（1ブロック分）
+  def inception_next_block(x, drop_path_rate):
+      residual = x
+      x0, x1, x2, x3 = channel_split(x, 4)  # 各128ch
+      x1 = depthwise_conv2d(x1, kernel=3x3)
+      x2 = depthwise_conv2d(x2, kernel=1x9)   # 段方向の全域
+      x3 = depthwise_conv2d(x3, kernel=9x1)   # 筋方向の全域
+      x = concat(x0, x1, x2, x3)              # 512ch
+      x = layer_norm(x)
+      x = linear(x, 512 → 2048) → GELU → linear(x, 2048 → 512)
+      return residual + drop_path(x, rate=drop_path_rate)
+
+  # ネットワーク全体
+  def forward(board_features, hand_features):
+      x = conv3x3(board_features) + conv1x1(hand_features)  # → 512ch
+      x = layer_norm(x)
+      for i in range(39):
+          x = inception_next_block(x, drop_path_rate=0.2*i/39)
+      x = transformer_block(x, heads=8, drop_path_rate=0.2)
+      policy = flatten(conv1x1_27ch(x)) + bias   # 2187次元
+      value  = fc(fc(layer_norm(conv1x1_27ch(x)))) # スカラー
+      return policy, value
+
+■ 備考
+
+  本アピール文書は、作者の技術力も日本語力もニューラルネットワークの層数ほど深くないため、
+  Kiro IDE上でClaude（Anthropic）の支援を受けて作成しました。
