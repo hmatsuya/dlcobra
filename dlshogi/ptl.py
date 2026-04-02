@@ -250,6 +250,8 @@ class Model(pl.LightningModule):
         swa_start_epoch=10,
         swa_lr=1e-4,
         compile_model=False,
+        flip_augmentation=False,
+        flip_ratio=0.5,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -296,6 +298,12 @@ class Model(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         features1, features2, move, result, value = batch
+        if self.hparams.flip_augmentation:
+            from dlshogi.augmentation import apply_horizontal_flip
+            features1, features2, move, result, value = apply_horizontal_flip(
+                features1, features2, move, result, value,
+                flip_ratio=self.hparams.flip_ratio,
+            )
         y1, y2 = self.model(features1, features2)
         loss1 = cross_entropy_loss(y1, move).mean()
         loss2 = bce_with_logits_loss(y2, result)

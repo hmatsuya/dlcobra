@@ -1,0 +1,7 @@
+# exp027: exp022 + horizontal flip data augmentation (50%)
+# Same architecture as exp022 (InceptionNeXt + plain attention tail)
+# Adds horizontal flip augmentation to training data with 50% probability
+model:
+  network: dlshogi.experiments.exp022_plain_attention_tail.model.PolicyValueNetwork
+  flip_augmentation: true
+  flip_ratio: 0.5

@@ -1,5 +1,16 @@
 # Experiment Log
 
+### exp027: 水平反転データ拡張
+**日付**: 2026-04-02
+**ベース実験**: exp022
+**パラメータ数**: 3.8M
+**改善内容**:
+- 訓練データの50%に水平反転（左右反転）augmentationを適用
+- 盤面特徴量（features1/features2）のfile軸を反転、指し手ラベルのLEFT↔RIGHT方向を入れ替え
+- `dlshogi/augmentation.py`に汎用的なflipルーチンを実装（NumPyルックアップテーブル方式）
+- `ptl.py`のModelに`flip_augmentation`/`flip_ratio`パラメータを追加、training_stepで適用
+- デバッグ実行（batch=32, 2epoch, GPU）で動作確認済み
+
 ### exp026: DropPath + bf16-mixed + grad clip（ゼロから学習）
 **日付**: 2026-03-28
 **ベース実験**: exp025
