@@ -1,5 +1,36 @@
 # Experiment Log
 
+### exp030: KD only（flip無し）
+**日付**: 2026-04-12
+**ベース実験**: exp028
+**パラメータ数**: 3.8M（student）/ 86.1M（teacher: exp026）
+**改善内容**:
+- exp028からflip augmentationを除いたアブレーション実験
+- KDの効果とflipの効果を切り分けるための比較用
+- Policy loss: 50% CE + 50% KD soft target（exp026ベストckpt、temperature=2.0）
+
+### exp029: exp026 (86.1M) + KD + 水平反転データ拡張
+**日付**: 2026-04-12
+**ベース実験**: exp026
+**パラメータ数**: 86.1M（student）/ 86.1M（teacher: exp026ベストckpt固定）
+**改善内容**:
+- exp026（86.1M）をベースに水平反転augmentation + KD損失を追加
+- resume_model: exp026ベストckpt（step=260000）から重みのみ引き継ぎ（LRリセット）
+- Policy loss: 50% CE + 50% KD soft target（teacher=exp026ベストckpt固定、temperature=2.0）
+- teacherはbf16で保持してメモリ節約
+- 動機: exp027で汎化性能向上・policy loss悪化の問題をKDで解決。studentとteacherが同アーキテクチャなのでKDが完全に活用できる
+
+### exp028: Knowledge Distillation + 水平反転データ拡張
+**日付**: 2026-04-12
+**ベース実験**: exp027
+**パラメータ数**: 3.8M（student）/ 86.1M（teacher: exp026）
+**改善内容**:
+- exp027（水平反転augmentation）をベースに損失関数を変更
+- Policy loss: 50% 通常CE loss + 50% KD soft target（exp026ベストckpt: step=260000を教師）
+- 教師temperature=2.0でsoft targetを生成（KD loss = CE(y/T, softmax(t/T)) × T²）
+- LRコサインスケジュール: cycle_limit=1（1周期のみ、exp026と同設定）
+- 動機: exp027で左右反転データ拡張により汎化性能は向上したがpolicy lossが悪化。KDで補正を試みる
+
 ### exp027: 水平反転データ拡張
 **日付**: 2026-04-02
 **ベース実験**: exp022

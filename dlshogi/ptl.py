@@ -252,15 +252,54 @@ class Model(pl.LightningModule):
         compile_model=False,
         flip_augmentation=False,
         flip_ratio=0.5,
+        kd_ratio=0.0,
+        teacher_ckpt=None,
+        teacher_network=None,
+        teacher_temperature=2.0,
     ):
         super().__init__()
         self.save_hyperparameters()
         self.model = policy_value_network(network)
         if resume_model:
             checkpoint = torch.load(resume_model, map_location="cpu")
-            self.model.load_state_dict(checkpoint["model"])
+            if "model" in checkpoint:
+                # serializers.save_npz format
+                self.model.load_state_dict(checkpoint["model"])
+            else:
+                # Lightning checkpoint format (state_dict with "model." or "model._orig_mod." prefix)
+                state_dict = checkpoint.get("state_dict", checkpoint)
+                stripped = {}
+                for k, v in state_dict.items():
+                    if k.startswith("model._orig_mod."):
+                        stripped[k[len("model._orig_mod."):]] = v
+                    elif k.startswith("model."):
+                        stripped[k[len("model."):]] = v
+                self.model.load_state_dict(stripped)
         if compile_model:
             self.model = torch.compile(self.model)
+        # Teacher model for knowledge distillation
+        self._teacher_model = None
+        if kd_ratio > 0.0 and teacher_ckpt:
+            teacher_net = policy_value_network(teacher_network if teacher_network else network)
+            ckpt = torch.load(teacher_ckpt, map_location="cpu")
+            # Lightning checkpoint: state_dict is under "state_dict" key, with "model." prefix
+            state_dict = ckpt.get("state_dict", ckpt)
+            # Strip "model." prefix if present (Lightning wraps model in self.model)
+            # Also handle torch.compile case: "model._orig_mod." prefix
+            stripped = {}
+            for k, v in state_dict.items():
+                if k.startswith("model._orig_mod."):
+                    stripped[k[len("model._orig_mod."):]] = v
+                elif k.startswith("model."):
+                    stripped[k[len("model."):]] = v
+            if stripped:
+                teacher_net.load_state_dict(stripped)
+            else:
+                teacher_net.load_state_dict(state_dict)
+            teacher_net.eval()
+            teacher_net.requires_grad_(False)
+            teacher_net = teacher_net.to(torch.bfloat16)
+            self._teacher_model = teacher_net
         if use_ema:
             self.ema_model = AveragedModel(
                 self.model, multi_avg_fn=get_ema_multi_avg_fn(ema_decay)
@@ -296,6 +335,10 @@ class Model(pl.LightningModule):
             # Initialize SWA model
             self.swa_model = AveragedModel(self.model)
 
+    def on_train_start(self):
+        if self._teacher_model is not None:
+            self._teacher_model = self._teacher_model.to(self.device)
+
     def training_step(self, batch, batch_idx):
         features1, features2, move, result, value = batch
         if self.hparams.flip_augmentation:
@@ -305,7 +348,23 @@ class Model(pl.LightningModule):
                 flip_ratio=self.hparams.flip_ratio,
             )
         y1, y2 = self.model(features1, features2)
-        loss1 = cross_entropy_loss(y1, move).mean()
+
+        # Policy loss: mix CE and KD
+        kd_ratio = self.hparams.kd_ratio
+        loss1_ce = cross_entropy_loss(y1, move).mean()
+        if kd_ratio > 0.0 and self._teacher_model is not None:
+            T = self.hparams.teacher_temperature
+            with torch.no_grad():
+                t1, _ = self._teacher_model(features1.to(torch.bfloat16), features2.to(torch.bfloat16))
+                t1 = t1.float()
+            soft_targets = F.softmax(t1 / T, dim=1)
+            loss1_kd = cross_entropy_loss_with_soft_target(y1 / T, soft_targets).mean() * (T * T)
+            loss1 = (1.0 - kd_ratio) * loss1_ce + kd_ratio * loss1_kd
+            self.log("train/policy_loss_kd", loss1_kd)
+            self.log("train/policy_loss_mixed", loss1)
+        else:
+            loss1 = loss1_ce
+
         loss2 = bce_with_logits_loss(y2, result)
         loss3 = bce_with_logits_loss(y2, value)
         loss = (
@@ -314,7 +373,7 @@ class Model(pl.LightningModule):
             + self.hparams.val_lambda * loss3
         )
         self.log("train/loss", loss)
-        self.log("train/policy_loss", loss1)
+        self.log("train/policy_loss", loss1_ce)
         self.log("train/result_loss", loss2)
         self.log("train/value_loss", loss3)
         self.log("train/policy_accuracy", accuracy(y1, move))
