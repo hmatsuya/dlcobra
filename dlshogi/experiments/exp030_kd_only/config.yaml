@@ -1,0 +1,19 @@
+# exp030: KD only (no horizontal flip augmentation)
+# - Architecture: exp022 (same as exp028)
+# - Data: no flip augmentation
+# - Loss: 50% CE + 50% KD soft target from exp026 best ckpt (temperature=2.0)
+# - LR: cosine schedule with cycle_limit=1
+model:
+  network: dlshogi.experiments.exp022_plain_attention_tail.model.PolicyValueNetwork
+  flip_augmentation: false
+  kd_ratio: 0.5
+  teacher_network: dlshogi.experiments.exp026_droppath_bf16_fresh.model.PolicyValueNetwork
+  teacher_ckpt: /home/hmatsuya/workspace/Shogi/dlcobra/dlshogi/wandb/wcsc36/bz5nhn8j/checkpoints/epoch=0-step=260000.ckpt
+  teacher_temperature: 2.0
+lr_scheduler:
+  class_path: dlshogi.lr_scheduler.CosineLRScheduler
+  init_args:
+    t_initial: 300000
+    warmup_t: 1000
+    cycle_limit: 1
+    warmup_prefix: true
