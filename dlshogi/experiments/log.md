@@ -1,5 +1,15 @@
 # Experiment Log
 
+### exp031: exp029ベストckptからflip augmentationのみで継続学習
+**日付**: 2026-04-22
+**ベース実験**: exp029
+**パラメータ数**: 86.1M
+**改善内容**:
+- exp029（KD + flip aug）がearly stopしたため、ベストckpt（step=116250, val/loss=2.001）から継続
+- KD損失を除去（kd_ratio=0.0）し、flip augmentationのみで学習
+- LRコサインスケジュールをリセット（resume_modelで重みのみ引き継ぎ）
+- KDなしでflip augの効果を最大限に引き出すことが目的
+
 ### exp030: KD only（flip無し）
 **日付**: 2026-04-12
 **ベース実験**: exp028
