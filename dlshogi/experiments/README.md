@@ -28,7 +28,8 @@ dlshogi/
     │   └── fit.log            # training log (generated)
     └── exp002_xxx/
         ├── config.yaml
-        └── run.sh
+        ├── run.sh
+        └── resume.sh
 ```
 
 ## Usage
@@ -55,10 +56,10 @@ bash dlshogi/experiments/exp001_fewer_activations/resume.sh
 
 ## Creating a new experiment
 
-1. Copy an existing experiment directory (e.g. `exp001_fewer_activations/`)
-2. Rename to `expNNN_short_description/`
-3. Add `__init__.py` so the folder is importable as a Python package
-4. Edit `config.yaml` with only the values that differ from the base `dlshogi/config.yaml`
+1. Copy the template directory: `cp -r dlshogi/experiments/_template/ dlshogi/experiments/expNNN_short_description/`
+   - The template includes `run.sh`, `resume.sh`, `profile.sh`, `profile.py`, `model.py`, `config.yaml`, and `__init__.py` by default
+2. Rename/edit as needed — the directory name becomes the experiment name
+3. Edit `config.yaml` with only the values that differ from the base `dlshogi/config.yaml`
 5. If the experiment has a custom network, define it in `model.py` and set in `config.yaml`:
    ```yaml
    model:
