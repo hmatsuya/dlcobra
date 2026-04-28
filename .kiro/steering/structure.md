@@ -25,7 +25,8 @@ DeepLearningShogi/
 │   │       ├── config.yaml     # Overrides base config
 │   │       ├── model.py        # Custom network (optional)
 │   │       ├── run.sh          # Launch script
-│   │       ├── resume.sh      # Resume from last checkpoint
+│   │       ├── resume.sh       # Resume from last checkpoint
+│   │       ├── wandb_run_id    # WandB run ID (written by run.sh, used by resume.sh)
 │   │       ├── profile.py      # Quick profiling (batch=128 default)
 │   │       ├── profile_detailed.py  # Detailed profiling (optional)
 │   │       └── docs/           # Experiment-specific docs (optional)

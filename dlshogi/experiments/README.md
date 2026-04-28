@@ -21,6 +21,7 @@ dlshogi/
     │   ├── config.yaml        # only overrides vs base config.yaml
     │   ├── run.sh             # launch script
     │   ├── resume.sh          # resume from last checkpoint
+    │   ├── wandb_run_id       # WandB run ID (written by run.sh, used by resume.sh)
     │   ├── profile.py         # quick profiling (batch=128 default)
     │   ├── profile_detailed.py # detailed profiling (optional)
     │   ├── docs/              # experiment-specific documentation (optional)
