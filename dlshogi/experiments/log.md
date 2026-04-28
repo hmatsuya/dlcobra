@@ -1,5 +1,17 @@
 # Experiment Log
 
+### exp032: exp029ベストckptの構造的プルーニング + KDファインチューニング
+**日付**: 2026-04-28
+**ベース実験**: exp029
+**パラメータ数**: 65.7M（プルーニング後）/ 86.1M（teacher: exp029ベストckpt固定）
+**改善内容**:
+- exp029ベストckpt（step=116250, val/loss=2.001）にL1ノルムチャネルプルーニングを適用
+- 対象: 39個のInceptionNeXtBlockのpwconv1/pwconv2（MLP展開次元 2048→1536、25%削減）
+- depthwise conv・attention block・ヘッドはプルーニング対象外
+- パラメータ削減: 86.1M→65.7M（-24%）
+- ファインチューニング: KD（teacher=exp029ベストckpt、kd_ratio=0.5、temperature=2.0）+ flip aug
+- 手順: `bash prune.sh` でpruned_state_dict.ptを生成 → `bash run.sh` でファインチューニング
+
 ### exp031: exp029ベストckptからflip augmentationのみで継続学習
 **日付**: 2026-04-22
 **ベース実験**: exp029
