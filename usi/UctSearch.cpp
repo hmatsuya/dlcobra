@@ -801,15 +801,22 @@ bool compare_child_node_ptr_descending(const child_node_t* lhs, const child_node
 inline std::tuple<std::string, int, int, Move, float, Move> get_pv(const uct_node_t* root_uct_node, const unsigned int best_root_child_index)
 {
 	const auto& best_root_uct_child = root_uct_node->child[best_root_child_index];
-	float best_wp = best_root_uct_child.win / best_root_uct_child.move_count;
 
 	// 勝ちの場合
+	float best_wp;
 	if (best_root_uct_child.IsLose()) {
 		best_wp = 1.0f;
 	}
 	// すべて負けの場合
 	else if (best_root_uct_child.IsWin()) {
 		best_wp = 0.0f;
+	}
+	// 未訪問ノードの場合（move_count==0による0除算を防ぐ）
+	else if (best_root_uct_child.move_count == 0) {
+		best_wp = 0.5f;
+	}
+	else {
+		best_wp = best_root_uct_child.win / best_root_uct_child.move_count;
 	}
 
 	const Move move = best_root_uct_child.move;
