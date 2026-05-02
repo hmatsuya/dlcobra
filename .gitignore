@@ -269,3 +269,8 @@ model/
 # PyTorch model checkpoints
 *.pt
 *.ckpt
+
+# Python compiled files
+*.pyc
+*.pyo
+__pycache__/
