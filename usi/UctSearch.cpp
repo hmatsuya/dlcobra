@@ -821,14 +821,16 @@ inline std::tuple<std::string, int, int, Move, float, Move> get_pv(const uct_nod
 
 	const Move move = best_root_uct_child.move;
 	int cp;
-	if (best_wp == 1.0f) {
+	if (best_wp >= 1.0f) {
 		cp = 30000;
 	}
-	else if (best_wp == 0.0f) {
+	else if (best_wp <= 0.0f) {
 		cp = -30000;
 	}
 	else {
-		cp = int(-logf(1.0f / best_wp - 1.0f) * eval_coef);
+		const float logit = -logf(1.0f / best_wp - 1.0f) * eval_coef;
+		// logitが[-30000, 30000]の範囲外になる場合（best_wpが極端に0や1に近い場合）をクランプ
+		cp = static_cast<int>(std::clamp(logit, -30000.0f, 30000.0f));
 	}
 
 	Move ponderMove = Move::moveNone();
