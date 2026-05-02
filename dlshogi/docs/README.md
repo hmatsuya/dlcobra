@@ -4,6 +4,37 @@ This directory contains general documentation for the DeepLearningShogi project.
 
 ## Files
 
+### [USI_OPTIONS.md](USI_OPTIONS.md)
+Complete reference for all USI engine options.
+
+**Contents:**
+- Book / 定跡オプション
+- モデル・推論設定
+- 探索パラメータ (PUCT, スレッド数, ノード上限)
+- 時間管理、投了・引き分け
+- 詰み探索 (df-pn, PV mate search)
+- ランダム手 (序盤多様化)
+- ポンダー、Multi-Ponder
+- 設定例 (本番 / 自己対局 / 引き分け回避)
+
+**When to read:** USIエンジンの設定を変更するとき。
+
+---
+
+### [BOOK_FILE_GUIDE.md](BOOK_FILE_GUIDE.md)
+定跡ファイルの使い方と作成方法。
+
+**Contents:**
+- BookEntry バイナリ形式
+- 対局中の USI オプション詳細
+- probe() の探索ロジック (千日手考慮含む)
+- 定跡ファイルの作成方法 (CSA棋譜 / UCT自動生成)
+- 関連ソースファイル
+
+**When to read:** 定跡ファイルを使用・作成するとき。
+
+---
+
 ### [TORCH_COMPILE_GUIDE.md](TORCH_COMPILE_GUIDE.md)
 Guide to using torch.compile for 1.2-1.3x inference speedup.
 
@@ -71,6 +102,8 @@ dlshogi/experiments/exp015_inceptionnext_depth10/docs/
 dlshogi/
 ├── docs/                                    # General documentation
 │   ├── README.md                            # This file
+│   ├── USI_OPTIONS.md                       # USI engine options reference
+│   ├── BOOK_FILE_GUIDE.md                   # 定跡ファイル使用・作成ガイド
 │   ├── optimization_ideas.md                # Optimization strategies
 │   └── PROFILING_GUIDE.md                   # Profiling guide
 │

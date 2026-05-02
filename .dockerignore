@@ -1,0 +1,52 @@
+# Exclude everything except the source code needed to compile the engine.
+# The checkpoint is NOT part of the build context — it is injected separately
+# by vastai/inject_model.sh after the image is built.
+
+# ── Exclude all heavy top-level dirs ─────────────────────────────────────────
+model/
+log/
+build/
+build_onnx/
+selfplay/
+test/
+tmp/
+notebook/
+usi_onnxruntime/
+usi_multiponder/
+doc/
+.venv/
+.git/
+.vscode/
+.kiro/
+
+# ── Exclude all large files at repo root ─────────────────────────────────────
+*.log
+*.json
+*.so
+
+# ── Exclude everything under dlshogi/ except Python source ───────────────────
+dlshogi/wandb/
+dlshogi/lightning_logs/
+dlshogi/download/
+dlshogi/.ipynb_checkpoints/
+dlshogi/**/__pycache__/
+dlshogi/**/*.pyc
+dlshogi/**/*.pyd
+dlshogi/**/*.so
+dlshogi/**/*.onnx
+dlshogi/**/*.ckpt
+dlshogi/**/*.pt
+dlshogi/**/*.npz
+dlshogi/**/*.npy
+dlshogi/**/*.hcpe
+dlshogi/**/*.hcpe3
+dlshogi/**/*.h5
+dlshogi/**/*.hdf5
+dlshogi/**/*.bin
+dlshogi/**/*.log
+dlshogi/fit.log
+
+# ── Exclude USI / cppshogi build artifacts ───────────────────────────────────
+usi/obj/
+usi/bin/
+cppshogi/obj/

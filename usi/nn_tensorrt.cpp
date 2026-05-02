@@ -93,10 +93,10 @@ void NNTensorRT::build(const std::string& onnx_filename)
 	}
 
 #if NV_TENSORRT_MAJOR >= 10
-	config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE, 64_MiB);
+	config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE, 4096_MiB);
 #else
 	builder->setMaxBatchSize(max_batch_size);
-	config->setMaxWorkspaceSize(64_MiB);
+	config->setMaxWorkspaceSize(4096_MiB);
 #endif
 
 	std::unique_ptr<nvinfer1::IInt8Calibrator> calibrator;
