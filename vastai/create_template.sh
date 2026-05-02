@@ -25,7 +25,7 @@ DISK_GB=20
 EXTRA_FILTERS='{"cuda_max_good":{"gte":12.6}}'
 
 # On-start: just print a ready message (engine is already compiled in the image)
-ONSTART='echo "=== dlshogi USI engine ready ===" && echo "Binary: /opt/DeepLearningShogi/usi/bin/usi" && echo "Upload model: scp -P \$SSH_PORT model.onnx root@\$PUBLIC_IPADDR:/workspace/model/" && echo "Run engine:  /workspace/run_usi.sh /workspace/model/model.onnx"'
+ONSTART='echo "=== dlshogi USI engine ready ===" && echo "Binary: /usr/local/bin/usi" && echo "Model:  /workspace/model/model.onnx" && echo "Run engine: /workspace/run_usi.sh"'
 
 if [ -n "${TEMPLATE_HASH}" ]; then
     # ── Update existing template ───────────────────────────────────────────────
@@ -55,5 +55,5 @@ echo ""
 echo "Done. Find your template at: https://cloud.vast.ai/templates/"
 echo ""
 echo "To launch an instance (example — RTX 4090, 1 GPU):"
-echo "  vastai search offers 'gpu_name=RTX_4090 num_gpus=1 cuda_max_good>=12.3 disk_space>=$DISK_GB inet_down>=200' -o dph"
+echo "  vastai search offers 'gpu_name=RTX_4090 num_gpus=1 cuda_max_good>=12.6 disk_space>=$DISK_GB inet_down>=200' -o dph"
 echo "  vastai create instance <OFFER_ID> --template_hash <HASH> --disk $DISK_GB"
