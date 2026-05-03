@@ -34,7 +34,7 @@ RUN pip install --no-cache-dir \
     torch==2.6.0 \
     onnx==1.17.0 \
     cshogi==0.8.9 \
-    numpy==2.2.5 \
+    numpy==1.26.4 \
     cython==3.0.11 \
     setuptools==79.0.1
 
