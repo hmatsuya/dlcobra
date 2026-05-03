@@ -8,7 +8,7 @@ Everything is already built and pushed. To launch an instance immediately:
 
 ```bash
 # 1. Find cheapest RTX 4090 with CUDA >= 12.6
-vastai search offers 'gpu_name=RTX_4090 num_gpus=1 cuda_max_good>=12.6 disk_space>=20 inet_down>=200' -o dph --raw \
+vastai search offers 'gpu_name=RTX_4090 num_gpus=1 cuda_max_good>=12.8 disk_space>=20 inet_down>=200' -o dph --raw \
   | python3 -c "import sys,json; o=json.load(sys.stdin); print(f\"ID: {o[0]['id']}  \${o[0]['dph_total']:.3f}/hr\")"
 
 # 2. Launch (replace OFFER_ID with ID from above)
@@ -175,7 +175,7 @@ TEMPLATE_HASH=<hash> bash vastai/create_template.sh
 
 ```bash
 # Find a suitable GPU (RTX 4090 or better, CUDA >= 12.6)
-vastai search offers 'gpu_name=RTX_4090 num_gpus=1 cuda_max_good>=12.6 disk_space>=20 inet_down>=200' -o dph
+vastai search offers 'gpu_name=RTX_4090 num_gpus=1 cuda_max_good>=12.8 disk_space>=20 inet_down>=200' -o dph
 
 # Create instance directly with the image (no template needed)
 vastai create instance <OFFER_ID> --image hmatsuya/dlshogi-usi:latest --disk 20 --ssh --direct
@@ -273,7 +273,7 @@ ShogiHome  ←stdin/stdout→  usi_ssh_proxy_ps.bat
 ## Notes
 
 - **TRT serialized cache**: on first run the engine parses the ONNX and writes a `.serialized` file next to the model. Subsequent runs load the cache directly (much faster startup). The cache is GPU-architecture-specific — it will be regenerated if you switch GPU models.
-- **Base image**: `nvcr.io/nvidia/tensorrt:24.09-py3` (TensorRT 10.4, CUDA 12.6, cuDNN 9.3). Requires a host with CUDA ≥ 12.6.
+- **Base image**: `nvcr.io/nvidia/tensorrt:25.03-py3` (TensorRT 10.8, CUDA 12.8, driver 570+). Supports RTX 4090 (Ada, sm_89) and RTX 5090 (Blackwell, sm_120). Requires host driver ≥ 570.
 - **TRT workspace**: set to 4 GB in `usi/nn_tensorrt.cpp`. Required for the attention block (block 39) — TRT 10.4 cannot find a `Slice` kernel implementation with the default 64 MiB workspace.
 - **ONNX opset**: 17 (legacy TorchScript exporter, IR v8). `LayerNormalization` is a first-class op in opset 17 and is natively supported by TRT 10.4. Do **not** downgrade to opset 16 or use the dynamo exporter (produces IR v10 which TRT cannot parse).
 - **FP16**: enabled automatically if the GPU supports it (the engine checks `platformHasFastFp16()`).
