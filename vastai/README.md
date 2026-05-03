@@ -7,9 +7,15 @@ Inference-only setup. The USI engine is **compiled at Docker image build time**,
 Everything is already built and pushed. To launch an instance immediately:
 
 ```bash
-# 1. Find cheapest RTX 4090 with CUDA >= 12.6
+# 1. Find cheapest RTX 4090/5090 with CUDA >= 12.8, excluding China (CN)
 vastai search offers 'gpu_name=RTX_4090 num_gpus=1 cuda_max_good>=12.8 disk_space>=20 inet_down>=200' -o dph --raw \
-  | python3 -c "import sys,json; o=json.load(sys.stdin); print(f\"ID: {o[0]['id']}  \${o[0]['dph_total']:.3f}/hr\")"
+  | python3 -c "
+import sys, json
+for o in json.load(sys.stdin):
+    if ', CN' not in o.get('geolocation',''):
+        print(f\"ID: {o['id']}  \${o['dph_total']:.3f}/hr  {o['geolocation']}\")
+        break
+"
 
 # 2. Launch (replace OFFER_ID with ID from above)
 vastai create instance <OFFER_ID> --image hmatsuya/dlshogi-usi:latest --disk 20 --ssh --direct
@@ -174,8 +180,15 @@ TEMPLATE_HASH=<hash> bash vastai/create_template.sh
 ## Step 5 — Launch an instance on championship day
 
 ```bash
-# Find a suitable GPU (RTX 4090 or better, CUDA >= 12.6)
-vastai search offers 'gpu_name=RTX_4090 num_gpus=1 cuda_max_good>=12.8 disk_space>=20 inet_down>=200' -o dph
+# Find a suitable GPU (RTX 4090 or better, CUDA >= 12.8, exclude China)
+vastai search offers 'gpu_name=RTX_4090 num_gpus=1 cuda_max_good>=12.8 disk_space>=20 inet_down>=200' -o dph --raw \
+  | python3 -c "
+import sys, json
+for o in json.load(sys.stdin):
+    if ', CN' not in o.get('geolocation',''):
+        print(f\"ID:{o['id']}  \${o['dph_total']:.3f}/hr  {o['geolocation']}\")
+        break
+"
 
 # Create instance directly with the image (no template needed)
 vastai create instance <OFFER_ID> --image hmatsuya/dlshogi-usi:latest --disk 20 --ssh --direct
@@ -280,3 +293,4 @@ ShogiHome  ←stdin/stdout→  usi_ssh_proxy_ps.bat
 - **Knowledge distillation checkpoints**: the loader in `export_onnx.py` strips `_teacher_model.*` keys automatically — KD checkpoints work the same as regular ones.
 - **docker group**: `hmatsuya` is in the `docker` group — `sudo` is not needed for any `docker` commands.
 - **Stopped vs destroyed instances**: `vastai stop` preserves the container filesystem (old image layers). Always use `vastai destroy` + `vastai create` when deploying a new image to ensure the fresh image is pulled.
+- **Avoid China (CN) hosts**: Chinese Vast.ai hosts may have connectivity issues with Docker Hub and SSH latency from Japan. Filter them out with `', CN' not in geolocation` when selecting offers.
