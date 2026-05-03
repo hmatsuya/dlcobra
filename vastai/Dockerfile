@@ -1,6 +1,7 @@
 # dlshogi USI engine — pre-compiled inference image
 #
-# Base: NVIDIA TensorRT 24.09 (TensorRT 10.3, CUDA 12.6, cuDNN 9.3)
+# Base: NVIDIA TensorRT 25.03 (TensorRT 10.8, CUDA 12.8, driver 570+)
+# Supports RTX 4090 (Ada, sm_89) and RTX 5090 (Blackwell, sm_120)
 #
 # Two-step build — keeps the checkpoint OUT of the Docker build context
 # so the context stays small (~50 MB) and fully cacheable.
@@ -16,7 +17,7 @@
 # Push:
 #   docker push hmatsuya/dlshogi-usi:latest
 
-FROM nvcr.io/nvidia/tensorrt:24.09-py3 AS builder
+FROM nvcr.io/nvidia/tensorrt:25.03-py3 AS builder
 
 # ── System packages ────────────────────────────────────────────────────────────
 RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
@@ -61,7 +62,7 @@ RUN curl -fsSL \
 # ══════════════════════════════════════════════════════════════════════════════
 # Final image — binary + book only; model.onnx injected separately
 # ══════════════════════════════════════════════════════════════════════════════
-FROM nvcr.io/nvidia/tensorrt:24.09-py3
+FROM nvcr.io/nvidia/tensorrt:25.03-py3
 
 # USI engine binary
 COPY --from=builder /build/usi/bin/usi /usr/local/bin/usi
