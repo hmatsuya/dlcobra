@@ -75,12 +75,28 @@ def export(ckpt_path: str, onnx_path: str, gpu: int) -> None:
     print(f"Loading checkpoint: {ckpt_path}")
     load_checkpoint(ckpt_path, model, device)
 
+    # Wrap with sigmoid on the value head so the ONNX output is a win
+    # probability in [0, 1].  The C++ engine (EvalNode) stores the raw
+    # network output directly as value_win and uses it as a probability;
+    # without sigmoid the logit can be >> 1 or << 0, causing score cp to
+    # saturate at ±30000.
+    class _WithSigmoid(torch.nn.Module):
+        def __init__(self, base):
+            super().__init__()
+            self.base = base
+        def forward(self, x1, x2):
+            policy, value = self.base(x1, x2)
+            return policy, torch.sigmoid(value)
+
+    model_export = _WithSigmoid(model)
+    model_export.eval()
+
     x1, x2 = make_dummy_inputs(device)
 
     print(f"Exporting to: {onnx_path}")
     with torch.no_grad():
         torch.onnx.export(
-            model,
+            model_export,
             (x1, x2),
             onnx_path,
             # Opset 17: LayerNormalization is a first-class op, which TRT 10+

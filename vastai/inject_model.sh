@@ -33,7 +33,7 @@ fi
 echo "=== Step 1: Export checkpoint → ONNX (CPU) ==="
 echo "  checkpoint : $CKPT_PATH"
 echo "  output     : $ONNX_TMP"
-python vastai/export_onnx.py "$CKPT_PATH" "$ONNX_TMP" --gpu -1
+PYTHONPATH=. python vastai/export_onnx.py "$CKPT_PATH" "$ONNX_TMP" --gpu -1
 echo "  ONNX size  : $(du -sh "$ONNX_TMP" | cut -f1)"
 
 echo ""
