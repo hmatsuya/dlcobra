@@ -500,7 +500,8 @@ void MySearcher::goUct(Position& pos) {
 
 	// Book使用
 	static Book book;
-	if (options["OwnBook"]) {
+	const int max_book_ply = options["Max_Book_Ply"];
+	if (options["OwnBook"] && (max_book_ply == 0 || (int)moves.size() < max_book_ply)) {
 		const std::tuple<Move, Score> bookMoveScore = options["Book_Consider_Draw"] ?
 			(options["Book_Consider_Draw_Depth"] > 0 ?
 				book.probeConsideringDrawDepth(pos, options["Book_File"]) : book.probeConsideringDraw(pos, options["Book_File"]))

@@ -14,6 +14,7 @@
 | `Book_File` | `book.bin` | 定跡ファイルのパス |
 | `Best_Book_Move` | `true` | `true`=最多出現手、`false`=頻度比例ランダム |
 | `Min_Book_Score` | `-3000` | この評価値未満の定跡手はスキップ |
+| `Max_Book_Ply` | `0` | この手数以降は定跡を使用しない (0=無制限) |
 | `Book_Consider_Draw` | `false` | 千日手の評価値を考慮 |
 | `Book_Consider_Draw_Depth` | `0` | 千日手を読む深さ (0=直前のみ) |
 
