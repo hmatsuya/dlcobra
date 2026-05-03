@@ -2,6 +2,38 @@
 
 Inference-only setup. The USI engine is **compiled at Docker image build time**, so instances start immediately with no compilation step.
 
+## Quick Launch (for AI assistants)
+
+Everything is already built and pushed. To launch an instance immediately:
+
+```bash
+# 1. Find cheapest RTX 4090 with CUDA >= 12.6
+vastai search offers 'gpu_name=RTX_4090 num_gpus=1 cuda_max_good>=12.6 disk_space>=20 inet_down>=200' -o dph --raw \
+  | python3 -c "import sys,json; o=json.load(sys.stdin); print(f\"ID: {o[0]['id']}  \${o[0]['dph_total']:.3f}/hr\")"
+
+# 2. Launch (replace OFFER_ID with ID from above)
+vastai create instance <OFFER_ID> --image hmatsuya/dlshogi-usi:latest --disk 20 --ssh --direct
+
+# 3. Wait for running, then get SSH details
+vastai show instance <INSTANCE_ID> --raw | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['actual_status'])"
+vastai ssh-url <INSTANCE_ID>
+# → ssh://root@<HOST>:<PORT>
+
+# 4. Test the engine (first run builds TRT cache, takes ~2 min)
+ssh -o StrictHostKeyChecking=no -p <PORT> root@<HOST> \
+  "echo -e 'usi\nisready\nusinewgame\nposition startpos\ngo byoyomi 3000\n' | timeout 180 /workspace/run_usi.sh 2>&1 | grep -E 'usiok|readyok|bestmove'"
+# Expected: usiok → readyok → bestmove <move>
+
+# 5. Stop billing when done
+vastai destroy instance <INSTANCE_ID>
+```
+
+**Important**: always use `vastai destroy` (not `vastai stop`) when done — stopped instances still bill for storage. Always `destroy` + `create` (never `stop` + `start`) when deploying a new image.
+
+**Current model**: `lzd2iw9l/last.ckpt` — exp032 KD fine-tuning run, step 71250, 65.7M params, sigmoid applied to value output.
+
+---
+
 ## Files
 
 | File | Purpose |
@@ -97,9 +129,10 @@ Next step — push to Docker Hub:
 
 The exported ONNX has:
 - **Inputs**: `input1` (board features, `[B, 62, 9, 9]`), `input2` (hand+flags, `[B, 57, 9, 9]`)
-- **Outputs**: `output_policy` (`[B, 2187]`), `output_value` (`[B, 1]`)
+- **Outputs**: `output_policy` (`[B, 2187]`), `output_value` (`[B, 1]`, sigmoid applied)
 - **Dynamic batch axis** on all four tensors
 - **Opset 17**, weights inlined (single self-contained file, no `.data` sidecar)
+- **Sigmoid on value**: the USI engine uses the ONNX value output directly as win probability in [0,1]. The sigmoid is applied inside the export wrapper so the raw logit is never exposed to the engine.
 
 The model is `PrunedPolicyValueNetwork` from exp032 — InceptionNeXt with `mlp_expansion_dim=1536`
 (25% MLP pruning from 2048), **65.7M parameters**.
@@ -144,8 +177,8 @@ TEMPLATE_HASH=<hash> bash vastai/create_template.sh
 # Find a suitable GPU (RTX 4090 or better, CUDA >= 12.6)
 vastai search offers 'gpu_name=RTX_4090 num_gpus=1 cuda_max_good>=12.6 disk_space>=20 inet_down>=200' -o dph
 
-# Create instance from your template
-vastai create instance <OFFER_ID> --template_hash <HASH> --disk 20
+# Create instance directly with the image (no template needed)
+vastai create instance <OFFER_ID> --image hmatsuya/dlshogi-usi:latest --disk 20 --ssh --direct
 
 # Get SSH connection details
 vastai ssh-url <INSTANCE_ID>
