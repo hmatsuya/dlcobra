@@ -27,6 +27,7 @@ struct BookEntry {
 | `Book_File` | `book.bin` | 定跡ファイルのパス |
 | `Best_Book_Move` | `true` | `true` = 最多出現手を選択、`false` = 出現頻度に比例してランダム選択 |
 | `Min_Book_Score` | `-3000` | この評価値未満の定跡手はスキップ |
+| `Max_Book_Ply` | `0` | この手数以降は定跡を使用しない (0=無制限) |
 | `Book_Consider_Draw` | `false` | 千日手の評価値を考慮して手を選ぶ |
 | `Book_Consider_Draw_Depth` | `0` | 何手先まで千日手を読むか (0=直前のみ、>0=depth手先まで再帰) |
 
@@ -54,7 +55,7 @@ isready
    - `Best_Book_Move=true` → `count` 最大の手を選択
    - `Best_Book_Move=false` → `count` に比例した確率でランダム選択
    - `Min_Book_Score` 未満の評価値の手はスキップ
-3. 定跡にない局面は通常のMCTS探索にフォールバック
+3. 定跡にない局面、または `Max_Book_Ply` を超えた手数の場合は通常のMCTS探索にフォールバック
 
 `Book_Consider_Draw=true` のとき:
 - 千日手 → `Draw_Value_Black` / `Draw_Value_White` で評価値を上書き

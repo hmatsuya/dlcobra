@@ -79,6 +79,7 @@ void OptionsMap::init(Searcher* s) {
     (*this)["Book_Consider_Draw_Depth"]    = USIOption(0, 0, 256);
     (*this)["OwnBook"]                     = USIOption(false);
     (*this)["Min_Book_Score"]              = USIOption(-3000, -ScoreInfinite, ScoreInfinite);
+    (*this)["Max_Book_Ply"]                = USIOption(0, 0, INT_MAX);
     (*this)["USI_Ponder"]                  = USIOption(false);
     (*this)["Stochastic_Ponder"]           = USIOption(true);
     (*this)["Byoyomi_Margin"]              = USIOption(0, 0, INT_MAX);
