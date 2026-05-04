@@ -28,7 +28,7 @@
 # ── User configuration ─────────────────────────────────────────────────────────
 $VastHost   = "YOUR_VAST_IP"          # e.g. "123.45.67.89"
 $VastPort   = "YOUR_VAST_PORT"        # e.g. "12345"  (shown in Vast.ai dashboard)
-$KeyFile    = "$env:USERPROFILE\.ssh\id_rsa"   # path to your private key
+$KeyFile    = "$env:USERPROFILE\.ssh\id_ed25519"   # path to your private key
 $RemoteCmd  = "/workspace/run_usi.sh"          # command to run on the server
 # ──────────────────────────────────────────────────────────────────────────────
 

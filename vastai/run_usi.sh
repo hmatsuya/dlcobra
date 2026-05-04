@@ -1,6 +1,6 @@
 #!/bin/bash
 # Launch the pre-compiled USI engine.
-# The ONNX model and Mafu opening book are baked into the image.
+# The ONNX model and opening books are baked into the image.
 #
 # Usage:
 #   /workspace/run_usi.sh [/path/to/model.onnx]
@@ -10,10 +10,14 @@
 #   UCT_THREADS     2
 #   DNN_BATCH_SIZE  128
 #   OWN_BOOK        true
-#   BOOK_FILE       /workspace/model/book.bin
+#   BOOK_FILE       /workspace/model/mafu_book.bin
+#
+# Available books in /workspace/model/:
+#   mafu_book.bin   Mafu opening theory ver11 (Apery format, 22 MB) [default]
+#   cobra_book.bin  Cobra book converted from YaneuraOu format (2.5 MB, 138K positions)
 
 MODEL="${1:-${DNN_MODEL:-/workspace/model/model.onnx}}"
-BOOK="${BOOK_FILE:-/workspace/model/book.bin}"
+BOOK="${BOOK_FILE:-/workspace/model/mafu_book.bin}"
 THREADS="${UCT_THREADS:-2}"
 BATCH="${DNN_BATCH_SIZE:-128}"
 
