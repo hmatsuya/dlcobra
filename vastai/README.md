@@ -47,6 +47,7 @@ vastai destroy instance <INSTANCE_ID>
 | `Dockerfile` | Builds the engine image (source only — no model weights in build context) |
 | `export_onnx.py` | Converts a pruned state dict or Lightning checkpoint to ONNX |
 | `inject_model.sh` | Exports ONNX locally and injects it into the built image |
+| `inject_book.sh` | Injects a book file into the image as `mafu_book.bin` or `cobra_book.bin` |
 | `run_usi.sh` | Launch wrapper baked into the image at `/workspace/run_usi.sh` |
 | `create_template.sh` | Creates (or updates) the Vast.ai template via CLI |
 | `usi_ssh_proxy.ps1` | Windows PowerShell proxy — connects ShogiHome to the remote engine via SSH |
@@ -60,13 +61,13 @@ The 250+ MB model weights are never sent through `docker build` — they are inj
 separately after the image is built.
 
 ```
-Step 1: docker build          Step 2: inject_model.sh
-  source code only (~50 MB)     export ONNX locally → docker cp into image
-  ↓                             ↓
-  engine binary compiled        model.onnx committed into image layer
-  book.bin downloaded           ↓
-  ↓                           docker push
-  image without model
+Step 1: docker build          Step 2: inject_model.sh       (optional) inject_book.sh
+  source code only (~50 MB)     export ONNX locally            docker cp <book>.bin into image
+  ↓                             → docker cp into image          ↓
+  engine binary compiled        model.onnx committed            mafu_book.bin / cobra_book.bin
+  Mafu book downloaded          into image layer                committed into image layer
+  ↓                             ↓                               ↓
+  image without model         docker push                     docker push
 ```
 
 ## Step 1 — Build the engine image
@@ -80,7 +81,7 @@ docker build -t hmatsuya/dlshogi-usi:latest -f vastai/Dockerfile .
 The build:
 1. Installs Python deps and builds the `cppshogi` Cython extension
 2. Compiles the USI engine with `make`
-3. Downloads the Mafu opening book (Apery format v11)
+3. Downloads the Mafu opening book (Apery format v11) as `mafu_book.bin`
 4. Copies only the binary + book into the lean final image (multi-stage build)
 
 All layers are fully cacheable. Rebuilding after a source change takes seconds.
@@ -199,14 +200,25 @@ vastai ssh-url <INSTANCE_ID>
 
 ## Step 6 — Connect and run
 
-The ONNX model and Mafu opening book (ver11, Apery format) are already baked into the image — no upload needed.
+The ONNX model and opening books are already baked into the image — no upload needed.
 
+Two books are available in `/workspace/model/`:
+
+| File | Description | Size |
+|---|---|---|
+| `mafu_book.bin` | Mafu opening theory ver11 (Apery format) — **default** | 22 MB |
+| `cobra_book.bin` | Cobra book converted from YaneuraOu format (138K positions) | 2.5 MB |
+
+The engine defaults to `mafu_book.bin`. To switch books at launch:
 ```bash
-# SSH in
-ssh -p <PORT> root@<HOST>
+BOOK_FILE=/workspace/model/cobra_book.bin /workspace/run_usi.sh
+```
 
-# Run the engine (reads from stdin, USI protocol)
-/workspace/run_usi.sh
+To swap in a new book without rebuilding:
+```bash
+bash vastai/inject_book.sh <path/to/book.bin> <dest_name> hmatsuya/dlshogi-usi:latest
+# e.g. dest_name: mafu_book.bin or cobra_book.bin
+docker push hmatsuya/dlshogi-usi:latest
 ```
 
 ## Step 7 — Connect ShogiHome (Windows) to the remote engine
@@ -224,7 +236,7 @@ appear as a local engine to ShogiHome.
    ```powershell
    $VastHost = "123.45.67.89"      # Vast.ai instance public IP
    $VastPort = "12345"             # SSH port from the Vast.ai dashboard
-   $KeyFile  = "C:\Users\you\.ssh\id_rsa"   # your private key
+   $KeyFile  = "C:\Users\you\.ssh\id_ed25519"   # your private key
    ```
 
    Get the values from the Vast.ai dashboard or:

@@ -58,7 +58,6 @@ RUN curl -fsSL \
         "Shogi_opening_theory-5.0/まふ定跡（Apery形式）ver11/book.bin" \
     && mv /tmp/book.bin /tmp/mafu_book.bin
 
-
 # ══════════════════════════════════════════════════════════════════════════════
 # Final image — binary + book only; model.onnx injected separately
 # ══════════════════════════════════════════════════════════════════════════════
@@ -67,8 +66,8 @@ FROM nvcr.io/nvidia/tensorrt:25.03-py3
 # USI engine binary
 COPY --from=builder /build/usi/bin/usi /usr/local/bin/usi
 
-# Mafu opening book
-COPY --from=builder /tmp/mafu_book.bin /workspace/model/book.bin
+# Mafu opening book (default; cobra_book.bin injected separately via inject_book.sh)
+COPY --from=builder /tmp/mafu_book.bin /workspace/model/mafu_book.bin
 
 # Convenience launch wrapper
 COPY vastai/run_usi.sh /workspace/run_usi.sh

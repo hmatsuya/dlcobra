@@ -18,7 +18,7 @@
 :: Configuration — edit the three variables below:
 ::   VAST_HOST   Public IP of the Vast.ai instance
 ::   VAST_PORT   SSH port shown in the Vast.ai dashboard
-::   VAST_KEY    Path to your private key file (.pem or .ppk for plink)
+::   VAST_KEY    Path to your private key file (e.g. id_ed25519)
 ::
 :: How to register in ShogiHome:
 ::   Engine > Add engine > select this .bat file
@@ -28,7 +28,7 @@
 :: ── User configuration ────────────────────────────────────────
 set VAST_HOST=YOUR_VAST_IP
 set VAST_PORT=YOUR_VAST_PORT
-set VAST_KEY=%USERPROFILE%\.ssh\id_rsa
+set VAST_KEY=%USERPROFILE%\.ssh\id_ed25519
 :: ─────────────────────────────────────────────────────────────
 
 :: Optional: override the remote command (default: run_usi.sh)
