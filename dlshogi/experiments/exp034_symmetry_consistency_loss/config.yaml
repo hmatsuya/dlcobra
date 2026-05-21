@@ -1,0 +1,60 @@
+# exp034: Symmetry Consistency Loss
+# - Architecture: exp026 (InceptionNeXt deep512 + DropPath, 86.1M)
+# - Init: resume from exp033 best checkpoint (flip aug from scratch)
+# - Data: 50% horizontal flip augmentation (same as exp033)
+# - Loss: CE + Symmetry Consistency Loss (sym_consistency_ratio=0.1, warmup=5000)
+#   - Value consistency: MSE(sigmoid(v_orig), sigmoid(v_flip))
+#   - Policy consistency: MSE(softmax(p_orig), flip(softmax(p_flip)))
+#     Uses correct 2187-dim move-label flip table (direction + square encoding)
+# - Motivation: regularizes the model to produce consistent predictions for
+#   a board and its horizontal mirror without requiring extra labelled data.
+#   Effectively doubles training signal for the policy head.
+trainer:
+  precision: bf16-mixed
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 8
+  max_epochs: 16
+  callbacks:
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      monitor: val/loss
+      save_last: true
+      save_top_k: 5
+      mode: min
+      save_on_train_epoch_end: false
+  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+  - class_path: lightning.pytorch.callbacks.EarlyStopping
+    init_args:
+      monitor: val/loss
+      patience: 20
+      min_delta: 0.0001
+      mode: min
+      verbose: true
+model:
+  network: dlshogi.experiments.exp026_droppath_bf16_fresh.model.PolicyValueNetwork
+  # resume_model: <path to exp033 best checkpoint>
+  compile_model: true
+  flip_augmentation: true
+  flip_ratio: 0.5
+  kd_ratio: 0.0
+  sym_consistency_ratio: 0.1
+  sym_consistency_warmup_steps: 5000
+data:
+  batch_size: 512
+  val_batch_size: 512
+lr_scheduler:
+  class_path: dlshogi.lr_scheduler.CosineLRScheduler
+  init_args:
+    # Shorter cycle than exp033 (300k): resuming from a checkpoint means the
+    # model already has good weights. A full 300k cycle would hit peak LR=0.001
+    # immediately, which risks destabilizing the learned representations.
+    # 100k steps at reduced peak LR (0.0003) is a standard fine-tuning pattern.
+    t_initial: 100000
+    warmup_t: 1000
+    cycle_limit: 1
+    warmup_prefix: true
+optimizer:
+  class_path: torch.optim.AdamW
+  init_args:
+    lr: 0.0003
+    weight_decay: 0.001

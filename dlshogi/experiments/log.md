@@ -1,5 +1,18 @@
 # Experiment Log
 
+### exp034: Symmetry Consistency Loss
+**日付**: 2026-05-08
+**ベース実験**: exp033
+**パラメータ数**: 86.1M
+**改善内容**:
+- exp033ベストckptから継続、flip augあり（50%）、KDなし
+- Symmetry Consistency Loss追加: モデルが盤面とその水平反転に対して一貫した予測を出すよう強制
+- Value一貫性: MSE(sigmoid(v_orig), sigmoid(v_flip))
+- Policy一貫性: MSE(softmax(p_orig), flip(softmax(p_flip))) — 正しい2187次元ラベルflipテーブルを使用
+- sym_consistency_ratio=0.1、warmup=5000ステップで徐々に適用
+- 追加フォワードパスが1回増えるため、メモリ・速度に注意（accumulate_grad_batches=8で調整済み）
+- LRスケジュール: ファインチューニング用に短縮（t_initial=100000、peak LR=0.0003）
+
 ### exp033: ゼロからflip augmentationのみで学習
 **日付**: 2026-05-05
 **ベース実験**: exp026

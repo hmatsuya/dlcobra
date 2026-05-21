@@ -256,6 +256,12 @@ class Model(pl.LightningModule):
         teacher_ckpt=None,
         teacher_network=None,
         teacher_temperature=2.0,
+        # Symmetry Consistency Loss: forces model predictions on a board and its
+        # horizontal mirror to be consistent (value identical, policy mirrored).
+        # This acts as a regularizer that effectively doubles training signal
+        # without requiring extra labelled data.
+        sym_consistency_ratio=0.0,
+        sym_consistency_warmup_steps=0,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -372,6 +378,42 @@ class Model(pl.LightningModule):
             + (1 - self.hparams.val_lambda) * loss2
             + self.hparams.val_lambda * loss3
         )
+
+        # Symmetry Consistency Loss
+        # Forces the model to produce consistent predictions for a board and its
+        # horizontal mirror: value should be identical, policy should be mirrored.
+        # Uses the correct move-label flip table from augmentation.py (not a naive
+        # spatial flip), which properly handles direction encoding in the 2187-dim
+        # policy vector (27 directions × 81 squares).
+        sym_ratio = self.hparams.sym_consistency_ratio
+        if sym_ratio > 0.0:
+            # Linear warmup: ramp sym_ratio from 0 to target over warmup steps
+            warmup = self.hparams.sym_consistency_warmup_steps
+            if warmup > 0 and self.global_step < warmup:
+                sym_ratio = sym_ratio * self.global_step / warmup
+
+            from dlshogi.augmentation import flip_features1, flip_features2, flip_probability
+            x1_flip = flip_features1(features1)
+            x2_flip = flip_features2(features2)
+            y1_flip, y2_flip = self.model(x1_flip, x2_flip)
+
+            # Value consistency: v(board) == v(flipped_board)
+            val_cons_loss = F.mse_loss(y2.sigmoid(), y2_flip.sigmoid())
+
+            # Policy consistency: softmax(p(board)) == flip(softmax(p(flipped_board)))
+            # flip_probability reorders the 2187-dim vector using the correct
+            # direction+square mapping, not a naive spatial reshape.
+            p_orig = F.softmax(y1, dim=1)
+            p_flip_mirrored = flip_probability(F.softmax(y1_flip, dim=1))
+            pol_cons_loss = F.mse_loss(p_orig, p_flip_mirrored)
+
+            sym_loss = sym_ratio * (val_cons_loss + pol_cons_loss)
+            loss = loss + sym_loss
+            self.log("train/sym_val_cons_loss", val_cons_loss)
+            self.log("train/sym_pol_cons_loss", pol_cons_loss)
+            self.log("train/sym_loss", sym_loss)
+            self.log("train/sym_ratio", sym_ratio)
+
         self.log("train/loss", loss)
         self.log("train/policy_loss", loss1_ce)
         self.log("train/result_loss", loss2)
