@@ -274,3 +274,6 @@ model/
 *.pyc
 *.pyo
 __pycache__/
+
+# Kiro MCP settings (may contain API keys)
+.kiro/settings/mcp.json
