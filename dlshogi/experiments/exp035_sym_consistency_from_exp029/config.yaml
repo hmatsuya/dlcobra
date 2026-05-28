@@ -1,0 +1,56 @@
+# exp035: Symmetry Consistency Loss from exp029 best checkpoint
+# - Architecture: exp026 (InceptionNeXt deep512 + DropPath, 86.1M)
+# - Init: resume from exp029 best ckpt (step=116250, val/loss=2.001)
+# - Data: 50% horizontal flip augmentation
+# - Loss: CE + Symmetry Consistency Loss (sym_consistency_ratio=0.1, warmup=5000)
+#   - Value consistency: MSE(sigmoid(v_orig), sigmoid(v_flip))
+#   - Policy consistency: MSE(softmax(p_orig), flip(softmax(p_flip)))
+# - KD: none (kd_ratio=0.0)
+# - Motivation: compare with exp031 (flip aug only, val/loss=2.186) to isolate
+#   the effect of Sym Consistency Loss on top of exp029 best ckpt.
+#   Also compare with exp034 (same loss but from exp033 best, val/loss=2.189).
+trainer:
+  precision: bf16-mixed
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 16
+  max_epochs: 16
+  callbacks:
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      monitor: val/loss
+      save_last: true
+      save_top_k: 5
+      mode: min
+      save_on_train_epoch_end: false
+  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+  - class_path: lightning.pytorch.callbacks.EarlyStopping
+    init_args:
+      monitor: val/loss
+      patience: 30
+      min_delta: 0.0001
+      mode: min
+      verbose: true
+model:
+  network: dlshogi.experiments.exp026_droppath_bf16_fresh.model.PolicyValueNetwork
+  resume_model: /home/hmatsuya/workspace/Shogi/dlcobra/dlshogi/wandb/wcsc36/wkpn9zzz/checkpoints/epoch=0-step=116250.ckpt
+  compile_model: true
+  flip_augmentation: true
+  flip_ratio: 0.5
+  kd_ratio: 0.0
+  sym_consistency_ratio: 0.1
+  sym_consistency_warmup_steps: 5000
+data:
+  batch_size: 256
+  val_batch_size: 256
+lr_scheduler:
+  class_path: dlshogi.lr_scheduler.CosineLRScheduler
+  init_args:
+    t_initial: 100000
+    warmup_t: 1000
+    cycle_limit: 1
+    warmup_prefix: true
+optimizer:
+  class_path: torch.optim.AdamW
+  init_args:
+    lr: 0.0003
+    weight_decay: 0.001

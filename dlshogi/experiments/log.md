@@ -1,5 +1,17 @@
 # Experiment Log
 
+### exp035: Symmetry Consistency Loss（exp029ベストckptから継続）
+**日付**: 2026-05-26
+**ベース実験**: exp029
+**パラメータ数**: 86.1M
+**改善内容**:
+- exp029ベストckpt（step=116250, val/loss=2.001）から継続、flip augあり（50%）、KDなし
+- Symmetry Consistency Loss追加（sym_consistency_ratio=0.1、warmup=5000ステップ）
+- exp034（exp033ベストckptから継続、val/loss=2.189）との比較実験
+- LRスケジュール: t_initial=100000、peak LR=0.0003、warmup_t=1000
+- EarlyStopping: patience=30（resume時はpatience=80に拡張、LRが下がる前に停止しないよう調整）
+- 現在のベスト val/loss: 2.151（step=7500時点）
+
 ### exp034: Symmetry Consistency Loss
 **日付**: 2026-05-08
 **ベース実験**: exp033
