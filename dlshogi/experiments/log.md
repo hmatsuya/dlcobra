@@ -1,5 +1,15 @@
 # Experiment Log
 
+### exp036: exp029のresume継続（patience拡大）
+**日付**: 2026-05-31
+**ベース実験**: exp029
+**パラメータ数**: 86.1M
+**改善内容**:
+- exp029のlast.ckpt（step=141,250、LR=0.000555）からLightning resumeで完全に状態を引き継ぎ
+- EarlyStopping patience: 20→50に拡大（cosineスケジュールの残り約160,000ステップを走らせる）
+- KD + flip augはexp029と同一設定を維持
+- 動機: exp029はcosineスケジュールの47%で早期停止。LR低下に伴う改善余地を探る
+
 ### exp035: Symmetry Consistency Loss（exp029ベストckptから継続）
 **日付**: 2026-05-26
 **ベース実験**: exp029

@@ -1,0 +1,50 @@
+# exp036: Resume exp029 training with longer patience
+# - exp029 stopped at step=141,250/300,000 (LR=0.000555, 47% of cosine schedule)
+# - EarlyStopping patience was 20 — too aggressive for slow convergence at this LR
+# - This experiment resumes full Lightning state (LR, optimizer, step counter)
+# - Only change: patience 20 → 50
+# - Expected: LR continues to decay, model may find better minima
+trainer:
+  precision: bf16-mixed
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 8
+  max_epochs: 16
+  callbacks:
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      monitor: val/loss
+      save_last: true
+      save_top_k: 5
+      mode: min
+      save_on_train_epoch_end: false
+  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+  - class_path: lightning.pytorch.callbacks.EarlyStopping
+    init_args:
+      monitor: val/loss
+      patience: 50
+      min_delta: 0.0001
+      mode: min
+      verbose: true
+model:
+  network: dlshogi.experiments.exp026_droppath_bf16_fresh.model.PolicyValueNetwork
+  compile_model: true
+  flip_augmentation: true
+  flip_ratio: 0.5
+  kd_ratio: 0.5
+  teacher_network: dlshogi.experiments.exp026_droppath_bf16_fresh.model.PolicyValueNetwork
+  teacher_ckpt: /home/hmatsuya/workspace/Shogi/dlcobra/dlshogi/wandb/wcsc36/bz5nhn8j/checkpoints/epoch=0-step=260000.ckpt
+  teacher_temperature: 2.0
+data:
+  batch_size: 512
+  val_batch_size: 512
+lr_scheduler:
+  class_path: dlshogi.lr_scheduler.CosineLRScheduler
+  init_args:
+    t_initial: 300000
+    warmup_t: 1000
+    cycle_limit: 1
+    warmup_prefix: true
+optimizer:
+  class_path: torch.optim.AdamW
+  init_args:
+    weight_decay: 0.001
