@@ -23,6 +23,11 @@
 - policy側は健全: val/policy_lossはstep=322,499まで改善継続（1.4914）、val/policy_accuracyはlast=0.5231が最高
 - 所見: 総合val/lossの悪化は小さくvalue過学習が支配的。次の一手はvalue正則化強化（val_lambda調整やweight_decay増）またはベストckpt（step=322,499）での打ち切りが妥当
 
+**結論**:
+- 2026-06-13、LRがほぼ0でプラトーに入っていたため手動停止（SIGTERMでgraceful終了）。EarlyStoppingのpatience=50到達を待たず早期に打ち切り
+- 成果物（最終ckpt）: `wandb/wcsc36/nknh13hm/checkpoints/epoch=1-step=322500.ckpt`（val/loss=1.9795）。ModelCheckpointのsave_top_k=5で上位5個も保存済み
+- 次実験の調整候補: value過学習が早いため、patienceは50より短め（例30）で十分。value正則化を狙うならexp036ベストckptからweight_decayを0.01に戻して短期FT
+
 ### exp035: Symmetry Consistency Loss（exp029ベストckptから継続）
 **日付**: 2026-05-26
 **ベース実験**: exp029
