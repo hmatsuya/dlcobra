@@ -55,26 +55,32 @@ Resume from last checkpoint (e.g. after early stopping):
 bash dlshogi/experiments/exp001_fewer_activations/resume.sh
 ```
 
+> **注意 (EarlyStopping state on resume)**: `--ckpt_path` でresumeすると、LightningはEarlyStoppingの `patience` と `wait_count` をcheckpointから復元します。そのため、resume時にconfigで `patience` を変更しても**無視されます**。さらに、early stopで保存されたckptは "停止済み" 状態（`wait_count == patience`, `reason=PATIENCE_EXHAUSTED`）のため、resume直後の1回の非改善validationで即再停止します。patienceを変えて続行したい場合は、checkpointのEarlyStopping状態を直接書き換えてください（例: exp036の `patch_ckpt_patience.py` — `wait_count=0`, 新`patience`, `reason=NOT_STOPPED` に変更。重み・optimizer・LR scheduler・stepは不変）。
+
 ## Creating a new experiment
 
 1. Copy the template directory: `cp -r dlshogi/experiments/_template/ dlshogi/experiments/expNNN_short_description/`
    - The template includes `run.sh`, `resume.sh`, `profile.sh`, `profile.py`, `model.py`, `config.yaml`, and `__init__.py` by default
 2. Rename/edit as needed — the directory name becomes the experiment name
+   - **既存実験をコピーして作る場合は、古い `wandb_run_id`（および `fit.log` など実行成果物）を必ず削除すること。** `wandb_run_id` が残っていると `resume.sh` が前の実験のrunを参照してしまう。`run.sh` は学習が*終了した後*にのみこのファイルを更新するため、実行中は古い値が残り続ける点にも注意:
+     ```bash
+     rm -f dlshogi/experiments/expNNN_short_description/wandb_run_id
+     ```
 3. Edit `config.yaml` with only the values that differ from the base `dlshogi/config.yaml`
-5. If the experiment has a custom network, define it in `model.py` and set in `config.yaml`:
+4. If the experiment has a custom network, define it in `model.py` and set in `config.yaml`:
    ```yaml
    model:
      network: dlshogi.experiments.expNNN_short_description.model.PolicyValueNetwork
    ```
-6. Run in debug mode to verify it starts correctly:
+5. Run in debug mode to verify it starts correctly:
    ```bash
    bash dlshogi/experiments/expNNN_short_description/run.sh --debug
    ```
-7. Run the profiler to check computation cost (uses batch=128 by default):
+6. Run the profiler to check computation cost (uses batch=128 by default):
    ```bash
    bash dlshogi/experiments/expNNN_short_description/profile.sh
    ```
-8. Add an entry to `log.md` (newest first) including the trainable parameter count:
+7. Add an entry to `log.md` (newest first) including the trainable parameter count:
    ```markdown
    ### expNNN: 説明
    **日付**: YYYY-MM-DD
@@ -83,7 +89,7 @@ bash dlshogi/experiments/exp001_fewer_activations/resume.sh
    **改善内容**:
    - ...
    ```
-9. (Optional) For detailed profiling and analysis:
+8. (Optional) For detailed profiling and analysis:
    ```bash
    python dlshogi/experiments/expNNN_short_description/profile_detailed.py
    ```

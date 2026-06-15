@@ -89,6 +89,8 @@ Example:
 
 ### New Experiment Checklist
 新しい実験を作成したら以下を実施する:
+0. 既存実験をコピーして作った場合は、古い実行成果物を削除する（特に `wandb_run_id`）。残っていると `resume.sh` が前の実験のrunを参照する。`run.sh` は学習*終了後*にしか `wandb_run_id` を更新しないため実行中は古い値が残る:
+   - `rm -f dlshogi/experiments/expNNN_.../wandb_run_id`
 1. デバッグモードで動作確認: `bash dlshogi/experiments/expNNN_.../run.sh --debug`
 2. モデルサマリーのTrainable paramsを確認し、`log.md`の`**パラメータ数**`に記載
 3. プロファイリングで計算コストを確認: `bash dlshogi/experiments/expNNN_.../profile.sh` (デフォルトbatch=128)

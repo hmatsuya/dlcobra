@@ -10,6 +10,19 @@
 - KD + flip augはexp029と同一設定を維持
 - 動機: exp029はcosineスケジュールの47%で早期停止。LR低下に伴う改善余地を探る
 
+**不具合と修正**:
+- 初回実行はconfigのpatience=50が効かず即early stop（fit.log: "did not improve in the last 21 records"）
+- 原因: LightningのEarlyStoppingはcheckpointからpatience/wait_countを復元するため、configの値が上書きされる。exp029のlast.ckptは"停止済み"状態（wait_count=20, patience=20, reason=PATIENCE_EXHAUSTED）で保存されており、resume直後の1回の非改善でwait_count=21→即停止していた
+- 修正: ptl.pyは編集せず、`patch_ckpt_patience.py`でcheckpointのEarlyStopping状態のみ書き換え（wait_count=0, patience=50, reason=NOT_STOPPED）。重み・optimizer・LR scheduler・global_stepは不変。run.shはパッチ済みckpt（last_patience50.ckpt）から再開するよう更新
+- debug実行（run.sh --debug）でパッチ済みckptのロードと学習再開を確認済み
+
+**結果**（run: nknh13hm、step=142,499→357,500）:
+- val/loss: 2.026（再開直後）→ ベスト **1.9795**（step=322,499）。exp029のベスト2.001から約0.02改善し、patience拡大は奏功
+- ベスト後28回のvalidationで改善なし、現在1.983（ベスト比+0.003）でプラトー。cosine LRがほぼ0まで減衰し改善余地は縮小
+- 過学習の主因はvalue head: val/value_lossはstep=152,499で底（0.5843）を打ち以降緩やかに悪化（last 0.5895）
+- policy側は健全: val/policy_lossはstep=322,499まで改善継続（1.4914）、val/policy_accuracyはlast=0.5231が最高
+- 所見: 総合val/lossの悪化は小さくvalue過学習が支配的。次の一手はvalue正則化強化（val_lambda調整やweight_decay増）またはベストckpt（step=322,499）での打ち切りが妥当
+
 ### exp035: Symmetry Consistency Loss（exp029ベストckptから継続）
 **日付**: 2026-05-26
 **ベース実験**: exp029
