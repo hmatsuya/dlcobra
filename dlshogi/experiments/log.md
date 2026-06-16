@@ -1,5 +1,19 @@
 # Experiment Log
 
+### exp038: 推論速度をInceptionNeXtに合わせたハイブリッドモデル
+**日付**: 2026-06-15
+**ベース実験**: exp026 (InceptionNeXt 86.1M)
+**パラメータ数**: 134.2M（dense ResNetブロック29個 + axial-NeXtブロック7個、channels=480, blocks=36, axial_period=5）
+**改善内容**:
+- exp037のベンチマークで、同一パラメータ数ではdense 3x3主体のハイブリッドがInceptionNeXt比約1.5x高速と判明
+- そこで「パラメータ数」ではなく「推論速度」をInceptionNeXtに揃える方針に変更し、速度の余裕を容量(パラメータ)増に振り分ける
+- 速度マッチ結果（RTX 3090, torch.compile FP16, batch=256）: InceptionNeXt 86.1M=2876 pos/s に対し、ハイブリッド 134.2M=2777 pos/s（0.97x、ほぼ同速）
+- ブロック構成: 高速なdense 3x3 ResNetブロックを主体に、axial-NeXtブロック（depthwise 1x9 + 9x1 + MLP、盤面全体のaxial受容野）を5ブロックごとに挿入
+- dense ブロックの活性化はSiLU、学習設定（bf16-mixed, grad clip, accumulate=8, cosine schedule）はexp026に合わせて公平比較
+- 目的: 同一推論コストでInceptionNeXtのaccuracy(val/loss, policy accuracy)を上回れるか検証
+- 速度ベンチ・速度マッチの再現コードは `dlshogi/experiments/exp037_trt_backbone_benchmark/`
+- 注: trtexecはドライバ(550.163.01)とランタイム不整合で本機では実行不可。速度測定はPyTorch FP16(torch.compile, exp017の本番経路)で実施
+
 ### exp036: exp029のresume継続（patience拡大）
 **日付**: 2026-05-31
 **ベース実験**: exp029
