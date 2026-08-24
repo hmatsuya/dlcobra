@@ -27,6 +27,10 @@ cdef extern from "python_module.h" nogil:
     pair[int, int] __hcpe3_to_hcpe(const string& file1, const string& file2) except +
     pair[int, int] __hcpe3_clean(const string& file1, const string& file2) except +
     unsigned int __get_max_features2_nyugyoku_num()
+    void __position_key_from_sfen(const string& sfen, char* ndkey)
+    void __position_keys_after(const string& sfen, const unsigned short* moves16, const size_t len, char* ndkeys)
+    unsigned long long __zobrist_fingerprint()
+    unsigned long long __apery_book_key_from_sfen(const string& sfen)
 
 init()
 
@@ -88,3 +92,15 @@ def hcpe3_clean(str file1, str file2):
 
 def get_max_features2_nyugyoku_num():
     return __get_max_features2_nyugyoku_num()
+
+def position_key_from_sfen(str sfen, np.ndarray ndkey):
+    __position_key_from_sfen(sfen.encode(locale.getpreferredencoding()), ndkey.data)
+
+def position_keys_after(str sfen, np.ndarray ndmoves16, np.ndarray ndkeys):
+    __position_keys_after(sfen.encode(locale.getpreferredencoding()), <unsigned short*>ndmoves16.data, len(ndmoves16), ndkeys.data)
+
+def zobrist_fingerprint():
+    return __zobrist_fingerprint()
+
+def apery_book_key_from_sfen(str sfen):
+    return __apery_book_key_from_sfen(sfen.encode(locale.getpreferredencoding()))

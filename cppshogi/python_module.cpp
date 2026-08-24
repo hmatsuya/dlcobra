@@ -1,11 +1,14 @@
 ﻿#include <numeric>
 #include <omp.h>
 #include "cppshogi.h"
+#include "book.hpp"
+#include "usi.hpp"
 
 void init() {
     initTable();
     Position::initZobrist();
     HuffmanCodedPos::init();
+    Book::init();
 }
 
 // make result
@@ -1028,4 +1031,61 @@ unsigned int __get_max_features2_nyugyoku_num() {
 #else
     return 0;
 #endif
+}
+
+// ndkey は POSITION_KEY dtype (hi <u8, lo <u8) の 16byte バッファ。
+// hi は盤面のhash key(手番bitを含む)、lo は持ち駒のhash key。
+void __position_key_from_sfen(const std::string& sfen, char* ndkey) {
+    Position pos;
+    pos.set(sfen);
+    Key* key = reinterpret_cast<Key*>(ndkey);
+    key[0] = pos.getBoardKey();
+    key[1] = pos.getHandKey();
+}
+
+// sfen の局面から1回だけ Position を作り、move16 ごとに指した後の Position_Key を求める。
+// ndkeys は POSITION_KEY dtype の len 個分のバッファ。
+void __position_keys_after(const std::string& sfen, const unsigned short* moves16, const size_t len, char* ndkeys) {
+    Position pos;
+    pos.set(sfen);
+    Key* keys = reinterpret_cast<Key*>(ndkeys);
+    for (size_t i = 0; i < len; ++i) {
+        const Move move = move16toMove((Move)moves16[i], pos);
+        const auto key = pos.getKeyAndBoardKeyAfter(move);
+        keys[i * 2 + 0] = key.second;             // hi: 指した後の盤面key(手番bitを含む)
+        keys[i * 2 + 1] = key.first - key.second; // lo: 指した後の持ち駒key
+    }
+}
+
+// Zobrist テーブルの初期化結果を検証するためのfingerprint。
+// Position::getBoardKey(), getHandKey(), getKeyAndBoardKeyAfter() という公開APIのみを経由し、
+// 初期局面とその全合法手を指した後のキーを混ぜ合わせて1つの64bit値にする。
+// Zobrist初期化順序が変わればこの値も変わるため、DB起動時の整合性チェックに使う。
+unsigned long long __zobrist_fingerprint() {
+    Position pos;
+    pos.set(DefaultStartPositionSFEN);
+
+    unsigned long long fp = 1469598103934665603ULL; // FNV-1a 64bit offset basis
+    auto mix = [&fp](const Key k) {
+        fp = (fp ^ static_cast<unsigned long long>(k)) * 1099511628211ULL;
+    };
+
+    mix(pos.getBoardKey());
+    mix(pos.getHandKey());
+
+    MoveList<Legal> ml(pos);
+    for (; !ml.end(); ++ml) {
+        const auto key = pos.getKeyAndBoardKeyAfter(ml.move());
+        mix(key.second);
+        mix(key.first - key.second);
+    }
+    return fp;
+}
+
+// Book::bookKey() (64bit, 手番側の手駒のみ) を返す。cshogiのBoard.book_key()と一致するかの
+// クロスチェックや、Apery形式の定跡ファイルの検索キーとして使う。
+unsigned long long __apery_book_key_from_sfen(const std::string& sfen) {
+    Position pos;
+    pos.set(sfen);
+    return Book::bookKey(pos);
 }

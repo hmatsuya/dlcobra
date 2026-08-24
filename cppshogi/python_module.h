@@ -21,3 +21,7 @@ void __hcpe3_stat_cache();
 std::pair<int, int> __hcpe3_to_hcpe(const std::string& file1, const std::string& file2);
 std::pair<int, int> __hcpe3_clean(const std::string& file1, const std::string& file2);
 unsigned int __get_max_features2_nyugyoku_num();
+void __position_key_from_sfen(const std::string& sfen, char* ndkey);
+void __position_keys_after(const std::string& sfen, const unsigned short* moves16, const size_t len, char* ndkeys);
+unsigned long long __zobrist_fingerprint();
+unsigned long long __apery_book_key_from_sfen(const std::string& sfen);

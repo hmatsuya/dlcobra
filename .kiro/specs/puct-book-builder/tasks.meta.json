@@ -1,0 +1,55 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "3.1 Implement `dlshogi/book/keys.py`": [
+      {
+        "executionId": "dfcd5b14-4e37-4c0a-9ac5-48a64c37186b",
+        "chatSessionId": "sess_c20369ba-954c-4437-a940-32e34dfcfae5",
+        "timestamp": 1787541419081
+      },
+      {
+        "executionId": "dfcd5b14-4e37-4c0a-9ac5-48a64c37186b",
+        "chatSessionId": "sess_c20369ba-954c-4437-a940-32e34dfcfae5",
+        "timestamp": 1787549099513
+      }
+    ],
+    "3.5 Implement `dlshogi/book/packed_edge.py`": [
+      {
+        "executionId": "dfcd5b14-4e37-4c0a-9ac5-48a64c37186b",
+        "chatSessionId": "sess_c20369ba-954c-4437-a940-32e34dfcfae5",
+        "timestamp": 1787541419612
+      },
+      {
+        "executionId": "dfcd5b14-4e37-4c0a-9ac5-48a64c37186b",
+        "chatSessionId": "sess_c20369ba-954c-4437-a940-32e34dfcfae5",
+        "timestamp": 1787549099718
+      }
+    ],
+    "3. Position_Key module, packed edge codec, and shared strategies": [
+      {
+        "executionId": "dfcd5b14-4e37-4c0a-9ac5-48a64c37186b",
+        "chatSessionId": "sess_c20369ba-954c-4437-a940-32e34dfcfae5",
+        "timestamp": 1787549101330
+      }
+    ],
+    "4.1 Implement `dlshogi/book/config.py`": [
+      {
+        "executionId": "771d5846-aaf5-4779-8645-973fc2a7c7ac",
+        "chatSessionId": "sess_2d0e5358-ebb4-422d-9aff-bbda13ec7216",
+        "timestamp": 1787558988948
+      },
+      {
+        "executionId": "771d5846-aaf5-4779-8645-973fc2a7c7ac",
+        "chatSessionId": "sess_2d0e5358-ebb4-422d-9aff-bbda13ec7216",
+        "timestamp": 1787560558299
+      }
+    ],
+    "4. Configuration loading and validation": [
+      {
+        "executionId": "771d5846-aaf5-4779-8645-973fc2a7c7ac",
+        "chatSessionId": "sess_2d0e5358-ebb4-422d-9aff-bbda13ec7216",
+        "timestamp": 1787560559698
+      }
+    ]
+  }
+}
