@@ -181,6 +181,21 @@
         "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
         "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
         "timestamp": 1787628156815
+      },
+      {
+        "executionId": "e3ef4deb-fb53-49b1-a353-4ae5c00fe5d7",
+        "chatSessionId": "sess_9237cfff-ebd0-4d23-9565-9f5656063932",
+        "timestamp": 1787632429946
+      },
+      {
+        "executionId": "b62e9c11-ed27-416a-8d54-4242e1e711e4",
+        "chatSessionId": "sess_9237cfff-ebd0-4d23-9565-9f5656063932",
+        "timestamp": 1787633760635
+      },
+      {
+        "executionId": "b62e9c11-ed27-416a-8d54-4242e1e711e4",
+        "chatSessionId": "sess_9237cfff-ebd0-4d23-9565-9f5656063932",
+        "timestamp": 1787634376774
       }
     ],
     "9.2 Wire backend selection into the Node_Store": [
@@ -188,6 +203,16 @@
         "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
         "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
         "timestamp": 1787628158065
+      },
+      {
+        "executionId": "b62e9c11-ed27-416a-8d54-4242e1e711e4",
+        "chatSessionId": "sess_9237cfff-ebd0-4d23-9565-9f5656063932",
+        "timestamp": 1787634384887
+      },
+      {
+        "executionId": "7d330f38-a1ac-434f-933b-2a21e595e303",
+        "chatSessionId": "sess_9237cfff-ebd0-4d23-9565-9f5656063932",
+        "timestamp": 1787635235240
       }
     ],
     "10.1 Implement the batching Evaluator against an injectable session": [
@@ -314,6 +339,13 @@
         "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
         "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
         "timestamp": 1787632206223
+      }
+    ],
+    "9. `puct_edge` PostgreSQL C extension (optimisation over the working fallback)": [
+      {
+        "executionId": "7d330f38-a1ac-434f-933b-2a21e595e303",
+        "chatSessionId": "sess_9237cfff-ebd0-4d23-9565-9f5656063932",
+        "timestamp": 1787635236847
       }
     ]
   }

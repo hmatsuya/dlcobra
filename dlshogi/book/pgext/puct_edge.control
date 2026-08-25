@@ -1,0 +1,5 @@
+# puct_edge extension
+comment = 'In-database packed-edge backup patch for PUCT Book Builder'
+default_version = '1.0'
+module_pathname = '$libdir/puct_edge'
+relocatable = true

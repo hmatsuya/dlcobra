@@ -11,11 +11,16 @@ node LRU) was added by task 7.6. The write path -- `insert_expansion`
 `set_propagation`/`stats`/the RSS sampler (task 8.8), and the in-flight
 claim mirror (task 8.10) -- is added by this module too, extending the
 same class rather than replacing it, and builds on the reconnection seam
-(`_run`) so every write inherits lost-connection handling for free. The
-`puct_edge` C extension backend of task 9 does not exist yet: `flush()`
-always uses the client-side fallback patch path
-(`_apply_backup_row`), which task 9.2 is meant to swap out later without
-`flush()` itself changing.
+(`_run`) so every write inherits lost-connection handling for free. As of
+task 9.2, `flush()` dispatches each node to one of two backup-patch
+backends, chosen once at startup by detecting whether the `puct_edge`
+PostgreSQL extension (task 9.1) is installed: the in-database
+`puct_edge_backup` UPDATE (`_apply_backup_row_extension`) when detected,
+otherwise the client-side `SELECT ... FOR UPDATE` fallback
+(`_apply_backup_row_fallback`). Both paths take PostgreSQL's row-level
+exclusive lock around the read-modify-write, so the no-lost-update
+guarantee holds either way; see `_detect_puct_edge_extension` and the
+`backend` property.
 
 **Startup sequencing** (design.md's "Error Handling" mermaid flowchart,
 nodes C4 through C17) is implemented by `NodeStore.connect` plus
@@ -781,6 +786,11 @@ class NodeStore:
         # (Requirement 4.5). Populated by `backup()`, drained by `flush()`.
         self._pending_backup: dict[PositionKey, "BackupDelta"] = {}
 
+        # -- task 9.2: backend selection for the backup patch path ---------
+        # Defaults to False (the fallback path) until _detect_puct_edge_
+        # extension has run; ensure_schema() runs it once, at startup.
+        self._puct_edge_extension_available: bool = False
+
         # -- task 8.1: expansion write counters (Requirement 11.6, 3.6) ----
         self.duplicate_count = 0
         self.collision_count = 0
@@ -823,6 +833,23 @@ class NodeStore:
     def effective_synchronous_commit(self) -> str:
         """The `synchronous_commit` value this instance's connections use."""
         return _SYNCHRONOUS_COMMIT_BY_ROLE[self._role]
+
+    @property
+    def backend(self) -> Literal["puct_edge_extension", "client_side_fallback"]:
+        """Which backup-patch backend `flush()` currently dispatches to.
+
+        Reflects `self._puct_edge_extension_available`, which is `False`
+        (i.e. this reads `"client_side_fallback"`) until
+        `_detect_puct_edge_extension` has run -- normally as part of
+        `ensure_schema()`/`connect_and_prepare()`. Exposed as a read-only
+        property (task 9.2) so tests and callers can assert on the
+        resolved backend without reaching into a private attribute.
+        """
+        return (
+            "puct_edge_extension"
+            if self._puct_edge_extension_available
+            else "client_side_fallback"
+        )
 
     # -- connect, with the Requirement 2.2/2.3 retry schedule -----------
 
@@ -931,6 +958,57 @@ class NodeStore:
                 await self._check_version_and_fingerprint(conn)
                 await self._repair_schema(conn)
         await self._load_root()
+        await self._detect_puct_edge_extension()
+
+    async def _detect_puct_edge_extension(self) -> None:
+        """Task 9.2: detect the `puct_edge` extension once, at startup.
+
+        Sets `self._puct_edge_extension_available` (read via the
+        `backend` property) and logs the resolved backup-patch backend
+        at INFO once, clearly, so which path is in use is visible in the
+        startup log.
+
+        Checks `pg_extension` for an extension named ``puct_edge``,
+        rather than probing `pg_proc`/`pg_catalog` for a function named
+        `puct_edge_backup`: the question this method answers is "was
+        `CREATE EXTENSION puct_edge;` run", not "does some function with
+        this name happen to exist" -- the control/SQL files task 9.1
+        added (`puct_edge.control`, `puct_edge--1.0.sql`) are designed for
+        the normal `CREATE EXTENSION` flow, and `pg_extension` is the
+        direct, minimal-surface way to ask that question.
+
+        Any failure of the detection query itself (e.g. `pg_extension`
+        unreadable for a benign permissions reason) is treated as
+        "extension not available" -- narrowly caught as
+        `asyncpg.PostgresError` -- rather than raised, so a detection
+        hiccup falls back safely instead of aborting startup. A genuine
+        connection-lost exception during detection is not caught here:
+        it propagates so the caller sees it through the same path every
+        other statement in this module does (this method does not go
+        through `_run`/the suspension seam, since it only runs once
+        during startup, before any descent could be waiting on
+        `suspended`).
+        """
+        try:
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchval(
+                    "SELECT 1 FROM pg_extension WHERE extname = 'puct_edge'"
+                )
+            self._puct_edge_extension_available = row is not None
+        except asyncpg.PostgresError as exc:
+            _LOG.warning(
+                "Node_Store: puct_edge extension detection query failed (%s); "
+                "falling back to the client-side patch path",
+                exc,
+            )
+            self._puct_edge_extension_available = False
+
+        if self._puct_edge_extension_available:
+            _LOG.info("Node_Store backup path: puct_edge extension (in-database)")
+        else:
+            _LOG.info(
+                "Node_Store backup path: client-side SELECT ... FOR UPDATE fallback"
+            )
 
     async def _schema_present(self, conn: asyncpg.Connection) -> bool:
         rows = await conn.fetch(
@@ -1548,13 +1626,16 @@ class NodeStore:
         that must not contain an `await`").
 
         Applies the snapshot as one `UPDATE` per node inside one
-        transaction, using the client-side fallback patch path (`SELECT
-        edges ... FOR UPDATE`, `packed_edge.patch_edges`, `UPDATE ... SET
-        edges = $n`) via `_apply_backup_row`, since the `puct_edge` C
-        extension of task 9 does not exist yet. `_apply_backup_row` is a
-        private seam precisely so task 9.2 can later swap in the
-        extension path (a single in-database `UPDATE` using
-        `puct_edge_backup`) without this method changing.
+        transaction, dispatching each node to one of two backend methods
+        chosen once at startup (`self._puct_edge_extension_available`,
+        set by `_detect_puct_edge_extension`): `_apply_backup_row_extension`
+        (the in-database `puct_edge_backup` UPDATE) when the `puct_edge`
+        C extension of task 9.1 is detected, otherwise
+        `_apply_backup_row_fallback` (`SELECT edges ... FOR UPDATE`,
+        `packed_edge.patch_edges`, `UPDATE ... SET edges = $n`). Both
+        methods take PostgreSQL's row-level exclusive lock around the
+        read-modify-write, so Requirement 11.8's no-lost-update guarantee
+        holds under either backend.
 
         A node present in the snapshot but absent from `book_node` (its
         expansion write has not yet committed, or was lost) is skipped
@@ -1572,11 +1653,17 @@ class NodeStore:
 
         start = time.monotonic()
 
+        apply_row = (
+            self._apply_backup_row_extension
+            if self._puct_edge_extension_available
+            else self._apply_backup_row_fallback
+        )
+
         async def _do_flush(pool: asyncpg.Pool) -> None:
             async with pool.acquire() as conn:
                 async with conn.transaction():
                     for delta in snapshot.values():
-                        await self._apply_backup_row(conn, delta)
+                        await apply_row(conn, delta)
 
         try:
             await self._run(_do_flush)
@@ -1593,7 +1680,9 @@ class NodeStore:
             raise
         self._write_latency.record(time.monotonic() - start)
 
-    async def _apply_backup_row(self, conn: asyncpg.Connection, delta: BackupDelta) -> None:
+    async def _apply_backup_row_fallback(
+        self, conn: asyncpg.Connection, delta: BackupDelta
+    ) -> None:
         """Apply one node's accumulated deltas, via the client-side fallback patch.
 
         `SELECT edges FROM book_node WHERE key_hi = $1 AND key_lo = $2 FOR
@@ -1602,14 +1691,13 @@ class NodeStore:
         value_sum + $, flags = flags | $, edges = $n`, all within the
         caller's transaction. The `FOR UPDATE` row lock is what gives the
         same no-lost-update guarantee the in-database `puct_edge_backup`
-        path (task 9) gives, at the cost of one extra round trip per node
-        per flush (design.md's "The backup write path", paragraph 2's
-        fallback note).
+        path (`_apply_backup_row_extension`) gives, at the cost of one
+        extra round trip per node per flush (design.md's "The backup
+        write path", paragraph 2's fallback note).
 
-        This is the seam task 9.2 is meant to swap out: a backend-selecting
-        `flush()` would call either this method or an extension-path
-        equivalent per node, chosen once at startup. No such selection
-        exists yet -- this method is always used.
+        Used by `flush()` whenever `self._puct_edge_extension_available`
+        is `False`, i.e. whenever the `puct_edge` C extension of task 9.1
+        was not detected at startup (`_detect_puct_edge_extension`).
         """
         key_hi = fold_u64_to_i64(delta.key.hi)
         key_lo = fold_u64_to_i64(delta.key.lo)
@@ -1651,6 +1739,88 @@ class NodeStore:
         # stale cached copy now that the pending overlay for this key has
         # been cleared (the snapshot dict backup() built this delta from
         # was already swapped out before flush() started applying it).
+        self._cache.invalidate(delta.key)
+
+    async def _apply_backup_row_extension(
+        self, conn: asyncpg.Connection, delta: BackupDelta
+    ) -> None:
+        """Apply one node's accumulated deltas via the in-database `puct_edge_backup`.
+
+        Issues design.md's "The backup write path" single-statement form:
+
+            UPDATE book_node
+               SET visit_count = visit_count + $3,
+                   value_sum   = value_sum   + $4,
+                   flags       = flags | $5,
+                   edges       = puct_edge_backup(edges, $6::int2[], $7::int4[], $8::float8[])
+             WHERE key_hi = $1 AND key_lo = $2;
+
+        Unlike `_apply_backup_row_fallback`, this never reads `edges`
+        first: the patch happens inside the UPDATE expression itself, so
+        there is no `SELECT ... FOR UPDATE` round trip and no client-side
+        byte patching at all. PostgreSQL's row-level exclusive lock taken
+        by the UPDATE is what gives the same no-lost-update guarantee the
+        fallback gets from `FOR UPDATE`.
+
+        When `delta.edge_deltas` is empty, `edges` is left as `edges`
+        (unchanged) rather than calling `puct_edge_backup` with
+        zero-length arrays -- simpler, and avoids a function call whose
+        only effect would be a copy, for the node-only-delta case that
+        `set_propagation`-free backups without edge deltas never actually
+        produce today but that a defensive caller could.
+
+        Used by `flush()` whenever `self._puct_edge_extension_available`
+        is `True`. Like the fallback, matches "no book_node row" (an
+        unexpanded node) by an empty `UPDATE ... WHERE` match count and
+        drops the delta with a warning rather than raising, since
+        `asyncpg`'s `execute()` on an UPDATE does not raise for a
+        no-op match; the row count in the returned status string is
+        checked instead.
+        """
+        key_hi = fold_u64_to_i64(delta.key.hi)
+        key_lo = fold_u64_to_i64(delta.key.lo)
+
+        if delta.edge_deltas:
+            move16s = list(delta.edge_deltas.keys())
+            visit_deltas = [delta.edge_deltas[m][0] for m in move16s]
+            value_deltas = [delta.edge_deltas[m][1] for m in move16s]
+            status = await conn.execute(
+                "UPDATE book_node SET visit_count = visit_count + $3, "
+                "value_sum = value_sum + $4, flags = flags | $5, "
+                "edges = puct_edge_backup(edges, $6::int2[], $7::int4[], $8::float8[]) "
+                "WHERE key_hi = $1 AND key_lo = $2",
+                key_hi,
+                key_lo,
+                delta.node_visit_delta,
+                delta.node_value_delta,
+                delta.flags_or,
+                move16s,
+                visit_deltas,
+                value_deltas,
+            )
+        else:
+            status = await conn.execute(
+                "UPDATE book_node SET visit_count = visit_count + $3, "
+                "value_sum = value_sum + $4, flags = flags | $5 "
+                "WHERE key_hi = $1 AND key_lo = $2",
+                key_hi,
+                key_lo,
+                delta.node_visit_delta,
+                delta.node_value_delta,
+                delta.flags_or,
+            )
+
+        if status.rsplit(" ", 1)[-1] == "0":
+            _LOG.warning(
+                "Node_Store.flush: no book_node row for %r; dropping %d pending "
+                "delta(s) for an unexpanded node",
+                delta.key,
+                1 + len(delta.edge_deltas),
+            )
+            return
+
+        # Same invalidation as the fallback path (see its docstring):
+        # a stale cached view must not be served after this flush.
         self._cache.invalidate(delta.key)
 
     # -- flusher lifecycle (task 8.6): 200 ms interval, and on stop -------

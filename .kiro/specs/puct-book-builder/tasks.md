@@ -266,13 +266,13 @@ example, not 100 short ones.
     - **Validates: Requirements 10.2**
     - `db` marker; assert every `book_node` row is byte-identical to its pre-startup state
 
-- [ ] 9. `puct_edge` PostgreSQL C extension (optimisation over the working fallback)
-  - [~] 9.1 Implement the extension
+- [x] 9. `puct_edge` PostgreSQL C extension (optimisation over the working fallback)
+  - [x] 9.1 Implement the extension
     - `dlshogi/book/pgext/puct_edge.c`: `puct_edge_backup(bytea, int2[], int4[], float8[]) RETURNS bytea`, `IMMUTABLE STRICT`, copying the input `bytea`, binary-searching the 20-byte records by `move16`, and adding the visit and value deltas in place
     - `dlshogi/book/pgext/Makefile` using PGXS, plus the control and SQL install files
     - _Requirements: 4.4, 11.8_
 
-  - [~] 9.2 Wire backend selection into the Node_Store
+  - [x] 9.2 Wire backend selection into the Node_Store
     - Detect the extension at startup and select the in-database patch path, otherwise fall back to the documented `SELECT ... FOR UPDATE` client-side patch of task 8.6; log which path is in use
     - Both paths take PostgreSQL's row-level exclusive lock, so the no-lost-update guarantee holds either way
     - _Requirements: 4.4, 11.8_
@@ -283,7 +283,7 @@ example, not 100 short ones.
     - `db` marker; `@settings(deadline=None)`; parametrised over both the extension path and the client-side fallback, and deliberately bypassing the coalescing accumulator so that PostgreSQL's row lock is what is actually tested
 
 - [ ] 10. Evaluator
-  - [~] 10.1 Implement the batching Evaluator against an injectable session
+  - [ ] 10.1 Implement the batching Evaluator against an injectable session
     - `dlshogi/book/evaluator.py`: `EvalRequest` with an `asyncio.Future`, one collector coroutine per process over an `asyncio.Queue`, a preallocated staging buffer of `Batch_Size` entries filled by `cshogi.dlshogi.make_input_features`
     - Dispatch at `Batch_Size` or when `Batch_Timeout` has elapsed since the **earliest** pending request, with the earliest-arrival timestamp captured when the first request enters an empty buffer and `remaining` recomputed on each iteration
     - Policy decoding via `make_move_label` gathering legal-move logits out of the 2187-entry head, then a normalised softmax over exactly those entries; the degenerate policy-sum case substitutes `1/n` before the softmax and reports
@@ -291,7 +291,7 @@ example, not 100 short ones.
     - The session is injected, so a stub returning drawn arrays satisfies the whole property suite with no GPU
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7_
 
-  - [~] 10.5 Wire the real onnxruntime session
+  - [ ] 10.5 Wire the real onnxruntime session
     - TensorRT execution provider first with `trt_fp16_enable` and `trt_engine_cache_enable`, CUDA provider as the fallback, driven through `io_binding` with `bind_cpu_input("input1"/"input2")` and `bind_output("output_policy"/"output_value")`, following `dlshogi/utils/usi_policy_only.py`
     - Log the resolved provider at startup; zero-pad a short final batch rather than triggering an engine rebuild, discarding the padded outputs
     - _Requirements: 5.1, 5.2, 15.7_
@@ -312,7 +312,7 @@ example, not 100 short ones.
     - `db` marker, since the property asserts that no `book_node` row is created or changed
 
 - [ ] 11. Repetition_Resolver and terminal states
-  - [~] 11.1 Implement `dlshogi/book/repetition.py`
+  - [ ] 11.1 Implement `dlshogi/book/repetition.py`
     - The resolver keeps **its own** `path_occurrences: dict[PositionKey, int]` keyed by the 128-bit Position_Key, incremented on push and decremented on pop, because cshogi's `is_draw()` was measured to return `REPETITION_DRAW` at the **second** occurrence and Requirement 8.1 needs the **fourth**
     - The resolver also keeps its own per-ply `board.is_check()` record, because cshogi exposes no `continuousCheck` equivalent; "checked at all four occurrences" is a scan of that record between the first and fourth occurrence indices
     - cshogi's `is_draw()` is consulted as a corroborating signal only, asserting agreement and reporting a discrepancy rather than driving the classification
@@ -336,7 +336,7 @@ example, not 100 short ones.
     - _Requirements: 8.3, 8.4_
 
 - [ ] 12. Prior_Mixer and Terashock_Index
-  - [~] 12.1 Implement `dlshogi/book/prior_mixer.py`
+  - [ ] 12.1 Implement `dlshogi/book/prior_mixer.py`
     - `t_raw(e) = exp(win_rate(e.ts_eval) / tau)` for edges carrying a Terashock evaluation and 0 otherwise, normalised to `t`, then `prior = (1 - w) * policy + w * t`
     - `win_rate(score) = 1 / (1 + exp(-score / Eval_Coef))`, the inverse of the `-log(1/wp - 1) * eval_coef` conversion used by `usi/UctSearch.cpp` and `make_book_minmax.py`
     - Illegal Terashock_Moves are dropped before `t_raw` is formed, so they influence neither the weights nor the edge set
@@ -344,7 +344,7 @@ example, not 100 short ones.
     - Mixing in float64, quantised to `prior_q16` on write
     - _Requirements: 7.3, 7.4, 7.5, 7.7, 7.9, 7.10_
 
-  - [~] 12.3 Implement `dlshogi/book/terashock.py`
+  - [ ] 12.3 Implement `dlshogi/book/terashock.py`
     - `import-terashock`: parse with Book_DB_Parser, `copy_records_to_table` into an unlogged staging table, then one `INSERT ... SELECT ... ON CONFLICT (key_hi, key_lo) DO UPDATE` so the **last** parsed entry wins and the conflict count is the duplicate-SFEN count
     - `moves` stored as `PACKED_TS_MOVE` records
     - Terashock_Index lookup by Position_Key with a small in-process LRU inside Cache_Budget; source identity (path, size, mtime, entry count, parser version) recorded in `book_meta` and compared at startup, triggering the import on mismatch or absence before any command is accepted
@@ -357,13 +357,13 @@ example, not 100 short ones.
     - `@settings(max_examples=1000)`; the tolerance assertions are made against the `prior_q16`-decoded values so the quantisation error budget is part of the property
 
 - [ ] 13. Search_Coordinator
-  - [~] 13.1 Implement the In_Flight_Set and the claim reaper
+  - [ ] 13.1 Implement the In_Flight_Set and the claim reaper
     - `dlshogi/book/search.py`: `InFlightSet` backed by a plain `dict[PositionKey, Claim]` carrying worker id and claim timestamp, with no lock, because a single-threaded event loop cannot preempt between the test and the add
     - **Code invariant, not a language guarantee:** `test_and_add` is a plain `def`, contains no `await`, no `asyncio.sleep`, and no coroutine call between the membership test and the insertion. Record the invariant as a module docstring note; Property 31 is its executable statement
     - `discard`, the 1000 ms release contract, and the 300 s reaper coroutine waking once per second
     - _Requirements: 11.2, 11.3, 11.7_
 
-  - [~] 13.3 Implement PUCT selection
+  - [ ] 13.3 Implement PUCT selection
     - Vectorized scoring over the decoded edge array: `q = where(n_eff > 0, w / max(n_eff, 1), q0)`, `score = q + c_puct * p * sqrt(n_par) / (1 + n_eff)`, with `n_eff = n + virtual_loss * in_flight_mask` and `w` left unchanged because virtual loss adds no wins
     - `w` needs no perspective flip, because a Book_Edge's accumulated value sum is stored from the parent Book_Node's side-to-move perspective
     - `q0` is 0.5 for an edge with no Terashock evaluation and the Terashock-derived win rate otherwise, computed as a vector over the `flags` bit-0 mask
@@ -371,7 +371,7 @@ example, not 100 short ones.
     - Excluded edges get `-inf`; virtual-loss terms are scoring-time only and are never written
     - _Requirements: 4.2, 4.7, 11.4_
 
-  - [~] 13.6 Implement the descent task
+  - [ ] 13.6 Implement the descent task
     - Termination rules in order: `Max_Book_Ply` depth reached, terminal state, no edges (expand, and the newly expanded node is this descent's leaf), otherwise select an edge with in-flight children excluded for the rest of the descent; all edges excluded means abandon with no write, report, and start the next descent within 100 ms
     - None of the four rules reads the side to move, which is what makes colour-independence a property of the search rather than a carve-out
     - Root node creation when absent, at visit count 0 and value sum 0, before the first descent
@@ -380,7 +380,7 @@ example, not 100 short ones.
     - Value backup through the coalescing accumulator with the per-node and per-edge perspective conversion
     - _Requirements: 4.1, 4.3, 4.4, 4.6, 4.7, 4.8, 4.9, 4.11, 4.12, 5.6, 8.11, 11.4, 11.7, 15.6_
 
-  - [~] 13.12 Implement the supervisor, resume, and shutdown
+  - [ ] 13.12 Implement the supervisor, resume, and shutdown
     - `TaskGroup`-style supervisor keeping exactly `Worker_Count` descent tasks alive with no bound on the number of descents, the wall-clock duration, or the Evaluator invocations per node; each completed task is replaced
     - Resume: a node with at least one Book_Edge or a non-empty terminal state counts as already evaluated and the Evaluator is not invoked for it; root-mismatch detection at startup
     - Stop: SIGINT / SIGTERM via `loop.add_signal_handler` plus the `stop` command sets a flag that starts no further descent and enqueues no further evaluation, lets in-flight descents finish, flushes the accumulator, and exits within 60 s; at the deadline the remaining tasks are cancelled, incomplete expansion writes discarded, and a forced-shutdown indication reported
@@ -446,7 +446,7 @@ example, not 100 short ones.
     - A straightforward recursive function, which is why the graph strategy caps at 2000 nodes
     - _Requirements: 9.2, 9.3, 9.4, 9.5, 9.9, 9.10, 9.12, 9.13, 9.15_
 
-  - [~] 14.2 Implement `dlshogi/book/propagate.py`
+  - [ ] 14.2 Implement `dlshogi/book/propagate.py`
     - Forward walk from the Root_Position over an **explicit** frame `list`, never Python recursion, bounded by `max(Max_Book_Ply, 1)` frames and by a hard 1024-frame guard when `Max_Book_Ply` is 0, counting cutoffs
     - Per frame: `set_sfen`, `np.frombuffer` decode, one batched `position_keys_after(sfen, edges["move16"])` call, a numpy threshold partition, then `asyncio.gather` of `get_many` for above-threshold children and `get_many_terminal_eval` for below-threshold children
     - Requirement 9 criterion 15's precedence order implemented **literally and in order**: terminal child; child on the current path (`Draw_Value_*` by the child's side to move, stored nowhere); below-threshold edge (visit count >= 1 gives `1 - clip(value_sum / visit_count, 0, 1)` with the clamp applied before the subtraction, visit count 0 gives the child's `eval_win_rate` else `Draw_Value_*`, neither descended into nor stored); otherwise the child's own propagated value
@@ -477,7 +477,7 @@ example, not 100 short ones.
     - `db` marker; the third conjunct runs a propagation pass over graphs whose Cyclic_Flag nodes carry poisoned stored values
 
 - [ ] 15. Book_Exporter
-  - [~] 15.1 Implement export phase 1 emission and filters
+  - [ ] 15.1 Implement export phase 1 emission and filters
     - `dlshogi/book/export.py`: an asyncpg server-side cursor streaming `book_node` in heap order with **no predicate at all**, so both sides to move are covered and the only exclusions are the per-edge ones
     - Per-edge exclusions: visit-count ratio below `Export_Visit_Threshold`; parent visit count 0; child with no `prop_value`; child whose `prop_value` is stale, tested as `prop_value IS NULL OR prop_epoch <> propagation_done_seq` over a batched child lookup that fetches `prop_epoch` alongside `prop_value`
     - Legality assertion via `board.move_from_move16` against `board.legal_moves`, aborting the export on failure since a violation means the graph is corrupt
@@ -485,13 +485,13 @@ example, not 100 short ones.
     - `ExportCounts` reporting records written, entries written, and excluded edges as the criterion 5 count plus the criterion 9 count; the stale-propagation warning when `search_write_seq > propagation_done_seq` or `propagation_done_seq = 0`, emitted before the first record with the export continuing
     - _Requirements: 12.1, 12.5, 12.6, 12.7, 12.8, 12.9, 12.11, 12.12_
 
-  - [~] 15.4 Implement the external sort and the Apery writer
+  - [ ] 15.4 Implement the external sort and the Apery writer
     - In-buffer ordering by `np.lexsort` over `(fromToPro asc, -count, -score, key)` applied last-key-first, with `score` and `count` widened to `int64` before negation and `key` read through the `<u8` field so the primary comparison is unsigned
     - Run files written with `arr[:n].tofile(...)`, phase 2 k-way merge over `np.memmap` windows with `heapq.merge` on the same total order
     - Output written to a temporary path in the destination directory and `os.replace()`-ed on success, so an unopenable or failing path leaves nothing at the target
     - _Requirements: 12.2, 12.3, 12.10_
 
-  - [~] 15.6 Implement the YaneuraOu `.db` export path
+  - [ ] 15.6 Implement the YaneuraOu `.db` export path
     - Phase 1 emits length-prefixed `(sfen, move-line block)` records, sorted by `bytes` SFEN keys, which is Python's native byte-wise order and exactly what Requirement 12.4 asks for
     - Phase 2 merges with `heapq.merge` and streams through Book_DB_Printer; the entry count is known before phase 2 opens the output so the `# NOE:` line needs no rewind; Terashock_Moves within an entry are ordered descending by evaluation value
     - _Requirements: 12.4, 12.10, 12.11, 12.12_
@@ -522,7 +522,7 @@ example, not 100 short ones.
     - `db` marker; verification against a freshly re-read file via `np.fromfile(path, cshogi.BookEntry)` and `board.move_from_move16`, not against in-memory state
 
 - [ ] 16. Progress_Reporter
-  - [~] 16.1 Implement `dlshogi/book/report.py`
+  - [ ] 16.1 Implement `dlshogi/book/report.py`
     - stdlib `logging` with a `RotatingFileHandler` plus a stderr handler, one structured JSON record per `Report_Interval`, woken by `loop.call_later` on the interval boundary so the `max(1 s, 0.1 * Report_Interval)` deadline is met by construction
     - Record contents: elapsed run time, Book_Node and Book_Edge counts from incrementally maintained counters rather than `SELECT count(*)`, cumulative completed descents, descents per second and Evaluator batches per second over the most recent interval, mean and p95 read and write latency from per-interval numpy bucket histograms reset each interval
     - Cumulative counters for Terashock injections, illegal Terashock discards, Evaluator failures, and duplicate node creations, as plain `int` attributes on the single event loop
@@ -542,7 +542,7 @@ example, not 100 short ones.
     - `RuleBasedStateMachine`; `@settings(max_examples=1000)`; sequences reaching 2000 intervals, with the grace period expressed as an integral number of intervals in half the cases
 
 - [ ] 17. CLI wiring, startup flow, and example tests
-  - [~] 17.1 Wire `dlshogi/book/__main__.py` and the startup flow
+  - [ ] 17.1 Wire `dlshogi/book/__main__.py` and the startup flow
     - `argparse` subcommands `search`, `propagate`, `export`, `import-terashock` dispatching to the implemented components
     - The startup order of the design's Error Handling flow: load and validate configuration, log it with credentials redacted, import `dlshogi.cppshogi`, connect with the retry schedule, create or repair the schema, check version and Zobrist fingerprint, check the Root_Position, import or verify the Terashock index, count and truncate `in_flight_claim`, then accept commands
     - `search` spawns one OS process per GPU, each repeating the read-only half of the checks and exiting if any disagrees; only the parent creates or repairs the schema; the parent forwards stop signals to every child inside one 60 s budget
@@ -557,7 +557,7 @@ example, not 100 short ones.
     - `tests/book/test_smoke.py`: the schema exists after startup; `assert POSITION_KEY.itemsize == 16`; every Book_Node and Book_Edge write of a run lands in the one Book_Graph named by the configured connection settings and in no other; `Worker_Count` descent tasks are created against one store; every configuration name and every command name is recognised
     - _Requirements: 2.1, 2.4, 3.1, 4.10, 11.1, 13.1, 13.4_
 
-- [~] 18. Checkpoint - full property suite green
+- [ ] 18. Checkpoint - full property suite green
   - Ensure all tests pass, ask the user if questions arise.
   - `pytest -m "not db"` and the full suite including `db` both pass; all 48 properties are implemented, each by exactly one property-based test
 
@@ -585,7 +585,7 @@ example, not 100 short ones.
     - Also export and re-parse the YaneuraOu `.db` output through `tests/book/reference/book_db.py`
     - _Requirements: 12.1, 12.2, 12.3, 12.4, 12.6, 12.7, 12.11, 12.12_
 
-- [~] 20. Final checkpoint
+- [ ] 20. Final checkpoint
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes
