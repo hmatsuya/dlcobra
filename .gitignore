@@ -277,3 +277,6 @@ __pycache__/
 
 # Kiro MCP settings (may contain API keys)
 .kiro/settings/mcp.json
+
+# hypothesis property-testing cache (tests/book/*)
+.hypothesis/

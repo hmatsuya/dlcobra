@@ -60,6 +60,7 @@ example, not 100 short ones.
     - Create the golden Position_Key vector fixture `tests/book/fixtures/position_keys.json` as (SFEN, key_hi, key_lo) triples covering the initial position, mid-game positions, drop and promotion positions, and positions differing only in the non-moving side's hand
     - This test is the gate that declares the prerequisite complete
     - _Requirements: 3.1, 3.4_
+    - Note: the golden fixtures (`tests/book/fixtures/zobrist_fingerprint.txt`, `tests/book/fixtures/position_keys.json`) were created and are consumed by `tests/book/test_keys.py` (task 3.2). The dedicated `tests/book/test_integration.py` build-and-import gate test itself remains unwritten.
 
 - [x] 3. Position_Key module, packed edge codec, and shared strategies
   - [x] 3.1 Implement `dlshogi/book/keys.py`
@@ -76,28 +77,33 @@ example, not 100 short ones.
     - Module-level assertions on `itemsize` and on the exact field offsets `[0, 2, 4, 5, 6, 8, 12]` and `[0, 2, 4, 6, 7]`
     - _Requirements: 1.2, 1.3, 1.7, 4.4, 7.2_
 
-  - [ ]* 3.6 Write the packed edge layout and codec tests
+  - [x] 3.6 Write the packed edge layout and codec tests
     - `tests/book/test_packed_edge.py`: dtype itemsize and field-offset assertions for both dtypes, `isalignedstruct is False`, little-endian format assertions, and an encode/decode round trip including the ascending-USI order assertion and the canonical-zero encoding of absent Terashock fields
     - _Requirements: 1.2, 1.3, 1.7_
+    - Note: writing this test uncovered a real bug in `encode_edges`/`patch_edges`: they sorted/searched by numeric `move16` rather than by USI text, which diverge whenever a promotion is present (promotion sets bit 14 of `move16`, which is not equivalent to lexicographic USI order). Fixed both functions in `dlshogi/book/packed_edge.py` to sort/index by `cshogi.move_to_usi(move16)`.
 
-  - [ ]* 3.7 Write the shared hypothesis strategies
+  - [x] 3.7 Write the shared hypothesis strategies
     - `tests/book/strategies.py` with the `@composite` strategies the design's property statements reuse: the self-play position strategy, the Position_Key strategy, the node-field strategy of Property 1, the `PACKED_EDGE` edge-array strategy of Property 12, the random-DAG graph strategy of Property 26 (transposition and back-edge rates, terminal and `eval_win_rate` masks, threshold-straddling visit counts), and the Terashock entry-list strategy of Property 20
     - _Requirements: 3.2, 4.2, 6.2, 9.1_
+    - Note: only the self-play position strategy (`self_play_sfen`/`self_play_board_with_moves`, needed by tasks 3.2-3.4 and 5.3-5.4) is implemented so far. The node-field, PACKED_EDGE edge-array, random-DAG, and Terashock entry-list strategies are added by the later tasks (7.7, 13.4, 14.3, 5.3) that first need them.
 
-  - [ ]* 3.2 Write property test for Position_Key stability
+  - [x] 3.2 Write property test for Position_Key stability
     - **Property 8: Position_Key depends only on the Board_State**
     - **Validates: Requirements 3.2, 3.4**
     - Include the subprocess recomputation so "across separate runs" is tested rather than assumed, and check the golden vector fixture and `zobrist_fingerprint()`
+    - Implemented in `tests/book/test_keys.py`, backed by `tests/book/fixtures/position_keys.json` and `zobrist_fingerprint.txt`.
 
-  - [ ]* 3.3 Write property test for the incremental child key
+  - [x] 3.3 Write property test for the incremental child key
     - **Property 10: Incremental child key equals the recomputed key**
     - **Validates: Requirements 3.7**
     - Check every legal move of each drawn position, and assert the batched `position_keys_after` agrees element-wise with the single-move form
+    - Implemented in `tests/book/test_keys.py`.
 
-  - [ ]* 3.4 Write property test for key collision freedom
+  - [x] 3.4 Write property test for key collision freedom
     - **Property 9: Position_Key is collision-free over the verification sample**
     - **Validates: Requirements 3.3**
     - One single example of 1,000,000 or more distinct Board_States under `@settings(max_examples=1, deadline=None)`, not 100 short examples
+    - Implemented in `tests/book/test_keys.py` (no `@given`/`@settings`, since the sample is one fixed-seed deterministic example, not a hypothesis-generated one); combines self-play random walks with random hand-redistribution perturbations. Runs in ~12s.
 
 - [x] 4. Configuration loading and validation
   - [x] 4.1 Implement `dlshogi/book/config.py`
@@ -108,20 +114,23 @@ example, not 100 short ones.
     - The two sizing **warnings**, which are warnings and not range violations: `Throughput_Floor > 1500 * process_count` and `Batch_Size > 2 * Throughput_Floor * Batch_Timeout`, plus `Worker_Count < 2 * Batch_Size`
     - _Requirements: 13.1, 13.2, 13.3, 13.5, 13.6, 13.7_
 
-  - [ ]* 4.2 Write property test for configuration validation
+  - [x] 4.2 Write property test for configuration validation
     - **Property 41: Configuration validation is exact**
     - **Validates: Requirements 13.2, 13.3, 13.5, 13.7**
     - The generator is driven from the range table in `config.py`, not from a hand-written list, with a 19-wide subset mask
+    - Implemented in `tests/book/test_config_properties.py`, driven from `config.RANGE_TABLE`'s full row list (23 rows, per that module's documented deviation from the literal "19" count) rather than a hand-written list.
 
-  - [ ]* 4.3 Write property test for credential redaction
+  - [x] 4.3 Write property test for credential redaction
     - **Property 42: Credentials are redacted**
     - **Validates: Requirements 13.6**
+    - Implemented in `tests/book/test_config_properties.py`, including the substring-overlap case.
 
 - [x] 5. YaneuraOu `.db` parsing and printing
-  - [ ]* 5.1 Write the independent `.db` reference implementation
+  - [x] 5.1 Write the independent `.db` reference implementation
     - `tests/book/reference/book_db.py`: a parser and printer written **from the Requirement 6 text alone**, importing nothing from `dlshogi.book`, reviewed against the requirements rather than against the implementation
     - Both sides are Python now, so independence is deliberate rather than a consequence of a language boundary; state that in the module docstring
     - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7_
+    - Note: this reference keeps moves as plain text (no board-based legality resolution), a deliberate, documented scope difference from `dlshogi.book.book_db`'s move16-canonicalisation; see the module docstring.
 
   - [x] 5.2 Implement `dlshogi/book/book_db.py`
     - `TerashockMove`, `TerashockEntry`, `TerashockBook` dataclasses with moves stored as `move16` so the printer output is canonical
@@ -130,19 +139,22 @@ example, not 100 short ones.
     - Every rejection reports line number and content to the Progress_Reporter and keeps everything parsed so far
     - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.10, 6.11, 6.12_
 
-  - [ ]* 5.3 Write property test for the entry-list round trip
+  - [x] 5.3 Write property test for the entry-list round trip
     - **Property 20: YaneuraOu `.db` printer/parser round trip**
     - **Validates: Requirements 6.1, 6.2, 6.3, 6.6, 6.7, 6.8**
     - Cross-check against `tests/book/reference/book_db.py`, not only against the implementation's own inverse
+    - Implemented in `tests/book/test_book_db.py`.
 
-  - [ ]* 5.4 Write property test for the text round trip and noise tolerance
+  - [x] 5.4 Write property test for the text round trip and noise tolerance
     - **Property 21: `.db` text round trip and noise tolerance**
     - **Validates: Requirements 6.4, 6.5, 6.9, 6.10, 6.11, 6.12**
     - Cross-check against `tests/book/reference/book_db.py`
+    - Implemented in `tests/book/test_book_db.py`.
 
-- [ ] 6. Checkpoint - pure modules green without a database or a GPU
+- [x] 6. Checkpoint - pure modules green without a database or a GPU
   - Ensure all tests pass, ask the user if questions arise.
   - `pytest -m "not db"` covers Properties 8, 9, 10, 20, 21, 41, 42 and the packed-edge layout assertions at this point
+  - Result: `pytest -m "not db"` -> 76 passed, 0 failed, in ~24s. Fixed a real bug found while writing the packed-edge codec test (see task 3.6's note). The task 2.3 gate test itself (`tests/book/test_integration.py`) and the node-field/edge-array/graph/entry-list hypothesis strategies remain for their owning later tasks, per task 3.7's note.
 
 - [ ] 7. Schema management and Node_Store read path
   - [ ] 7.1 Write `dlshogi/book/sql/schema.sql`

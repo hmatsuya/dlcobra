@@ -11,24 +11,31 @@ Files land here as the tasks that need them are implemented. This README
 is kept up to date with what each corpus is for and which task/property
 populates and consumes it.
 
-## Planned corpora
+## Present corpora
 
-- **`zobrist_fingerprint.txt`** (task 2.3) -- the golden `zobrist_fingerprint()`
-  value recorded once against the extended `dlshogi.cppshogi` binding.
-  `tests/book/test_integration.py`'s binding build-and-import gate test
-  compares the running binding's fingerprint against this file, so an
-  accidental change to Zobrist table initialization order is caught
-  immediately rather than silently re-keying every Position_Key already
-  stored in a book database (see Requirement 3.4 and design.md's
-  *Position_Key from Python* section).
+- **`zobrist_fingerprint.txt`** (task 2.3, consumed by tasks 3.2/3.4's
+  `tests/book/test_keys.py`) -- the golden `zobrist_fingerprint()` value
+  recorded once against the extended `dlshogi.cppshogi` binding
+  (`5210274903348193363`). `test_keys.py` compares the running binding's
+  fingerprint against this file, so an accidental change to Zobrist table
+  initialization order is caught immediately rather than silently
+  re-keying every Position_Key already stored in a book database (see
+  Requirement 3.4 and design.md's *Position_Key from Python* section). A
+  future `tests/book/test_integration.py` binding build-and-import gate
+  test (task 2.3's own remaining scope) reuses the same file.
 
-- **`position_keys.json`** (task 2.3) -- golden `(SFEN, key_hi, key_lo)`
-  triples covering the initial position, representative mid-game
-  positions, drop and promotion positions, and pairs of positions that
+- **`position_keys.json`** (task 2.3, consumed by tasks 3.2/3.3's
+  `tests/book/test_keys.py`) -- golden `(name, sfen, key_hi, key_lo)`
+  entries covering the initial position, two independent mid-game
+  positions, a drop-and-promotion position, and a pair of positions that
   differ only in the non-moving side's hand (the case that Apery's 64-bit
   `Book::bookKey` gets wrong and that Requirement 3.2 requires the 128-bit
-  Position_Key to get right). Used by Properties 8 and 10 as `@example`
-  pins and by the binding gate test.
+  Position_Key to get right -- verified directly: both entries share
+  `key_hi` but differ in `key_lo`, while `cshogi.Board.book_key()` returns
+  the same 64-bit value for both). Used by Properties 8 and 10 as pinned
+  regression checks.
+
+## Planned corpora
 
 - **Perpetual-check positions** (task 11.4) -- real SFEN positions for
   four-fold repetition under continuous check by the mover only, by the

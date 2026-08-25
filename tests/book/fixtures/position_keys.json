@@ -1,0 +1,41 @@
+{
+  "zobrist_fingerprint": 5210274903348193363,
+  "positions": [
+    {
+      "name": "initial",
+      "sfen": "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1",
+      "key_hi": 16732684942872435170,
+      "key_lo": 0
+    },
+    {
+      "name": "midgame_seed99_ply40",
+      "sfen": "lns4n1/r2k2Gbl/pgps1p+Bpp/1p1Pp1p2/1N7/PPP1P4/3K1PPPP/3S1S1R1/L1G1G2NL b P 41",
+      "key_hi": 14179892972504959582,
+      "key_lo": 8746212414268574112
+    },
+    {
+      "name": "midgame_seed5_ply30",
+      "sfen": "lng2g1nl/3k3b1/rsp1psp1p/pp1p5/5p1p1/PPPP4P/4PPPP1/1B2RG1S1/LNSGK2NL b - 31",
+      "key_hi": 10494537462039437200,
+      "key_lo": 0
+    },
+    {
+      "name": "drop_and_promotion_seed123",
+      "sfen": "l8/k1rs2sb1/p1p+P1gn2/GP2p1p1l/1p1p1pR1P/P3PPPp1/1n3G3/L2SK2PL/GNB3S2 w Pnp 128",
+      "key_hi": 13157976507943417803,
+      "key_lo": 12041809454258852534
+    },
+    {
+      "name": "hand_only_pair_a_no_black_pawn_in_hand",
+      "sfen": "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL w - 1",
+      "key_hi": 16732684942872435171,
+      "key_lo": 0
+    },
+    {
+      "name": "hand_only_pair_b_black_pawn_in_hand",
+      "sfen": "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL w P 1",
+      "key_hi": 16732684942872435171,
+      "key_lo": 8746212414268574112
+    }
+  ]
+}

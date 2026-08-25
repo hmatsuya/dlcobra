@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
+import cshogi
 import numpy as np
 
 # 20 bytes, no padding. Field order and offsets match design.md's "Packed
@@ -60,13 +61,22 @@ def encode_edges(edges: Sequence) -> bytes:
     ``edges`` is any sequence of objects (or mappings) exposing the
     ``PACKED_EDGE`` field names -- ``move16``, ``prior_q16``, ``ts_depth``,
     ``flags``, ``ts_eval``, ``visit_count``, ``value_sum``. The result is
-    sorted ascending by ``move16``, which is equivalent to ascending USI
-    order because ``move16`` (Apery's ``proFromAndTo``) determines the USI
-    string with no position context (Requirement 1.3; see design.md's
-    "Packed edge record"). An edge with no Terashock evaluation (``flags``
-    bit 0 clear, or no ``flags``/``ts_eval``/``ts_depth`` supplied at all)
-    is written with ``ts_eval = 0`` and ``ts_depth = 0``, the canonical
-    zero encoding Property 30's idempotence check relies on.
+    sorted ascending by the move's USI notation (Requirement 1.3), *not*
+    by the numeric ``move16`` value: promotion sets bit 14 of ``move16``
+    (Apery's ``proFromAndTo``), which places every promoting move numerically
+    after every non-promoting move regardless of destination square, while
+    a promoting move's USI string (e.g. ``"3c1a+"``) sorts immediately next
+    to its non-promoting counterpart (``"3c1a"``) -- so numeric ``move16``
+    order and lexicographic USI order are genuinely different total orders
+    over the same edge set, and only the latter is what Requirement 1.3, the
+    PUCT tie-break of Requirement 4.2, and the propagation best-move
+    tie-break of Requirement 9.3 all rely on. ``cshogi.move_to_usi(move16)``
+    determines the USI string with no position context, so the sort key is
+    computed once per edge and needs no board. An edge with no Terashock
+    evaluation (``flags`` bit 0 clear, or no
+    ``flags``/``ts_eval``/``ts_depth`` supplied at all) is written with
+    ``ts_eval = 0`` and ``ts_depth = 0``, the canonical zero encoding
+    Property 30's idempotence check relies on.
     """
     n = len(edges)
     arr = np.zeros(n, dtype=PACKED_EDGE)
@@ -81,7 +91,8 @@ def encode_edges(edges: Sequence) -> bytes:
         arr[i]["ts_eval"] = _field(e, "ts_eval", 0) if has_terashock else 0
         arr[i]["visit_count"] = _field(e, "visit_count", 0)
         arr[i]["value_sum"] = _field(e, "value_sum", 0.0)
-    order = np.argsort(arr["move16"], kind="stable")
+    usis = [cshogi.move_to_usi(int(m16)) for m16 in arr["move16"]]
+    order = sorted(range(n), key=lambda i: usis[i])
     arr = arr[order]
     return arr.tobytes()
 
@@ -121,12 +132,20 @@ def patch_edges(
     ``value_deltas`` are the corresponding per-edge increments. Every
     named ``move16`` must already be present in ``blob``; the patch never
     creates a new edge record.
+
+    The blob is ordered ascending by USI notation, not by the numeric
+    ``move16`` value (see ``encode_edges``), so the lookup here is a plain
+    ``move16 -> index`` dict rather than a binary search over
+    ``arr["move16"]``: that array is not sorted, and a ``searchsorted`` over
+    it would silently return wrong indices for any edge set containing a
+    promotion whose USI-order position differs from its numeric-order
+    position.
     """
     arr = np.frombuffer(blob, dtype=PACKED_EDGE).copy()
-    keys = arr["move16"]
-    idx = np.searchsorted(keys, move16)
-    for i, m, dv, dw in zip(idx, move16, visit_deltas, value_deltas):
-        if i >= len(keys) or keys[i] != m:
+    index_by_move16 = {int(m16): i for i, m16 in enumerate(arr["move16"])}
+    for m, dv, dw in zip(move16, visit_deltas, value_deltas):
+        i = index_by_move16.get(int(m))
+        if i is None:
             raise KeyError(f"move16 {m} not present in packed edge list")
         arr[i]["visit_count"] = arr[i]["visit_count"] + dv
         arr[i]["value_sum"] = arr[i]["value_sum"] + dw
