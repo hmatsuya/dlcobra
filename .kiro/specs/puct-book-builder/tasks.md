@@ -156,21 +156,21 @@ example, not 100 short ones.
   - `pytest -m "not db"` covers Properties 8, 9, 10, 20, 21, 41, 42 and the packed-edge layout assertions at this point
   - Result: `pytest -m "not db"` -> 76 passed, 0 failed, in ~24s. Fixed a real bug found while writing the packed-edge codec test (see task 3.6's note). The task 2.3 gate test itself (`tests/book/test_integration.py`) and the node-field/edge-array/graph/entry-list hypothesis strategies remain for their owning later tasks, per task 3.7's note.
 
-- [ ] 7. Schema management and Node_Store read path
-  - [ ] 7.1 Write `dlshogi/book/sql/schema.sql`
+- [x] 7. Schema management and Node_Store read path
+  - [x] 7.1 Write `dlshogi/book/sql/schema.sql`
     - `book_meta`, `book_node`, `terashock_entry`, `in_flight_claim` DDL exactly as the design's Schema section states, including the `book_node_edges_len` check, `WITH (fillfactor = 70)`, and `ALTER COLUMN edges/sfen SET STORAGE MAIN`
     - Exactly one index on `book_node`, the primary key on `(key_hi, key_lo)`; no index on `apery_key`, `prop_epoch`, or any child key
     - A comment recording that `book_node` is deliberately **not** `UNLOGGED`, because `UNLOGGED` relations are truncated by crash recovery and that would contradict Requirements 2.3, 10.1, and 10.3
     - _Requirements: 1.1, 1.2, 2.4, 2.7_
 
-  - [ ] 7.2 Implement Node_Store connection and schema management
+  - [x] 7.2 Implement Node_Store connection and schema management
     - `dlshogi/book/node_store.py`: asyncpg pool with `max_size = min(Worker_Count, 64)`, connections acquired per statement rather than per descent
     - Schema creation within 300 s, schema version and Zobrist fingerprint recording and comparison, Root_Position recording and read-back, absent-element-only repair, and the connection retry schedule (5 s per attempt, 1 s doubling to a 60 s cap, `Connection_Retry_Limit` retries)
     - The lost-connection suspension seam: one catch point for `ConnectionDoesNotExistError` / `ConnectionResetError`, a suspension `asyncio.Event` every descent task waits on, resumption on reconnect
     - Set `synchronous_commit = off` on the search session and `on` for propagation and export sessions, and log the effective setting at startup
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 4.10_
 
-  - [ ] 7.6 Implement the Node_Store read path
+  - [x] 7.6 Implement the Node_Store read path
     - `BookNodeView`, `GetResult` with `FOUND` / `ABSENT` / `FAILED` distinct, `get`, `get_many` over `(key_hi, key_lo) = ANY(...)`, and `get_many_terminal_eval` as the narrow `(terminal, eval_win_rate)` projection for below-threshold propagation children
     - `get` consults the node LRU, then the pending backup accumulator, then PostgreSQL; the absent path issues no INSERT
     - Node LRU with byte accounting bounded by Cache_Budget, evicting rather than failing

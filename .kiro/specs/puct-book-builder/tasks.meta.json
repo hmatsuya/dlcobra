@@ -64,6 +64,49 @@
         "chatSessionId": "sess_586558cc-23bd-475d-b4e8-dbcf833cc03f",
         "timestamp": 1787619054171
       }
+    ],
+    "7.1 Write `dlshogi/book/sql/schema.sql`": [
+      {
+        "executionId": "02d391d3-6043-4ae4-bb9d-f2a5078a6682",
+        "chatSessionId": "sess_bd5a2dfa-bdd4-4598-a1cb-8dcbf63a1d90",
+        "timestamp": 1787624604208
+      },
+      {
+        "executionId": "02d391d3-6043-4ae4-bb9d-f2a5078a6682",
+        "chatSessionId": "sess_bd5a2dfa-bdd4-4598-a1cb-8dcbf63a1d90",
+        "timestamp": 1787624918293
+      }
+    ],
+    "7.2 Implement Node_Store connection and schema management": [
+      {
+        "executionId": "02d391d3-6043-4ae4-bb9d-f2a5078a6682",
+        "chatSessionId": "sess_bd5a2dfa-bdd4-4598-a1cb-8dcbf63a1d90",
+        "timestamp": 1787624958833
+      },
+      {
+        "executionId": "02d391d3-6043-4ae4-bb9d-f2a5078a6682",
+        "chatSessionId": "sess_bd5a2dfa-bdd4-4598-a1cb-8dcbf63a1d90",
+        "timestamp": 1787626848141
+      }
+    ],
+    "7.6 Implement the Node_Store read path": [
+      {
+        "executionId": "02d391d3-6043-4ae4-bb9d-f2a5078a6682",
+        "chatSessionId": "sess_bd5a2dfa-bdd4-4598-a1cb-8dcbf63a1d90",
+        "timestamp": 1787626873183
+      },
+      {
+        "executionId": "02d391d3-6043-4ae4-bb9d-f2a5078a6682",
+        "chatSessionId": "sess_bd5a2dfa-bdd4-4598-a1cb-8dcbf63a1d90",
+        "timestamp": 1787627382991
+      }
+    ],
+    "7. Schema management and Node_Store read path": [
+      {
+        "executionId": "02d391d3-6043-4ae4-bb9d-f2a5078a6682",
+        "chatSessionId": "sess_bd5a2dfa-bdd4-4598-a1cb-8dcbf63a1d90",
+        "timestamp": 1787627384097
+      }
     ]
   }
 }
