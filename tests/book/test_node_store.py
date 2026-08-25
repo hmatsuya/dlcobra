@@ -29,12 +29,16 @@ from dlshogi.book.config import BookConfig
 from dlshogi.book.keys import PositionKey, fold_u64_to_i64, zobrist_fingerprint
 from dlshogi.book.node_store import (
     SCHEMA_VERSION,
+    BackupDelta,
     BookNodeView,
+    ExpansionWrite,
     GetResult,
     NodeStore,
     NodeStoreConnectionError,
+    PropagationWrite,
     SchemaVersionMismatchError,
     Terminal,
+    WriteOutcome,
     retry_schedule,
 )
 from dlshogi.book.packed_edge import encode_edges
@@ -640,5 +644,614 @@ async def test_node_lru_evicts_under_small_cache_budget(pg_scratch_database, pg_
         assert result is GetResult.FOUND
         assert recent_key in store._cache
         assert store.cache_bytes <= config.cache_budget
+    finally:
+        await store.close()
+
+
+# ---------------------------------------------------------------------------
+# task 8.1: insert_expansion -- the atomic expansion write.
+# ---------------------------------------------------------------------------
+
+
+def _make_edges():
+    return [
+        {
+            "move16": 0x0083,
+            "prior_q16": 10000,
+            "flags": 0,
+            "ts_depth": 0,
+            "ts_eval": 0,
+            "visit_count": 0,
+            "value_sum": 0.0,
+        },
+        {
+            "move16": 0x0102,
+            "prior_q16": 20000,
+            "flags": 0,
+            "ts_depth": 0,
+            "ts_eval": 0,
+            "visit_count": 0,
+            "value_sum": 0.0,
+        },
+    ]
+
+
+@pytest.mark.db
+async def test_insert_expansion_commits_and_reads_back(pg_scratch_database, pg_conn):
+    await _drop_book_tables(pg_conn)
+    config = _make_config(pg_scratch_database, connection_retry_limit=0)
+
+    store = await NodeStore.connect_and_prepare(config)
+    try:
+        key = PositionKey(9001, 9002)
+        write = ExpansionWrite(
+            key=key,
+            sfen="commit-node",
+            apery_key=555,
+            terminal=Terminal.NONE,
+            eval_win_rate=0.6,
+            edges=_make_edges(),
+        )
+        result = await store.insert_expansion(write)
+        assert result.outcome is WriteOutcome.COMMITTED
+        assert result.key == key
+
+        row = await pg_conn.fetchrow(
+            "SELECT * FROM book_node WHERE key_hi = $1 AND key_lo = $2",
+            fold_u64_to_i64(key.hi),
+            fold_u64_to_i64(key.lo),
+        )
+        assert row is not None
+        assert row["sfen"] == "commit-node"
+        assert row["edge_count"] == 2
+
+        get_result, view = await store.get(key)
+        assert get_result is GetResult.FOUND
+        assert len(view.edges) == 2
+    finally:
+        await store.close()
+
+
+@pytest.mark.db
+async def test_insert_expansion_duplicate_same_sfen_leaves_row_unchanged(
+    pg_scratch_database, pg_conn
+):
+    await _drop_book_tables(pg_conn)
+    config = _make_config(pg_scratch_database, connection_retry_limit=0)
+
+    store = await NodeStore.connect_and_prepare(config)
+    try:
+        key = PositionKey(9101, 9102)
+        write = ExpansionWrite(
+            key=key, sfen="dup-node", apery_key=1, eval_win_rate=0.7, edges=_make_edges()
+        )
+        first = await store.insert_expansion(write)
+        assert first.outcome is WriteOutcome.COMMITTED
+        assert store.duplicate_count == 0
+
+        # A second writer racing on the same key with the same SFEN.
+        second_write = ExpansionWrite(
+            key=key, sfen="dup-node", apery_key=1, eval_win_rate=0.99, edges=[]
+        )
+        second = await store.insert_expansion(second_write)
+        assert second.outcome is WriteOutcome.DUPLICATE
+        assert second.existing_sfen == "dup-node"
+        assert store.duplicate_count == 1
+        assert store.collision_count == 0
+
+        # The retained row's evaluation fields are untouched by the losing write.
+        row = await pg_conn.fetchrow(
+            "SELECT * FROM book_node WHERE key_hi = $1 AND key_lo = $2",
+            fold_u64_to_i64(key.hi),
+            fold_u64_to_i64(key.lo),
+        )
+        assert row["eval_win_rate"] == pytest.approx(0.7)
+        assert row["edge_count"] == 2
+    finally:
+        await store.close()
+
+
+@pytest.mark.db
+async def test_insert_expansion_idempotent_reapplication(pg_scratch_database, pg_conn):
+    """Requirement 10.4: re-applying the identical expansion is a no-op."""
+    await _drop_book_tables(pg_conn)
+    config = _make_config(pg_scratch_database, connection_retry_limit=0)
+
+    store = await NodeStore.connect_and_prepare(config)
+    try:
+        key = PositionKey(9201, 9202)
+        write = ExpansionWrite(
+            key=key, sfen="idempotent-node", apery_key=2, eval_win_rate=0.5, edges=_make_edges()
+        )
+        first = await store.insert_expansion(write)
+        assert first.outcome is WriteOutcome.COMMITTED
+
+        before = dict(
+            await pg_conn.fetchrow(
+                "SELECT * FROM book_node WHERE key_hi = $1 AND key_lo = $2",
+                fold_u64_to_i64(key.hi),
+                fold_u64_to_i64(key.lo),
+            )
+        )
+
+        second = await store.insert_expansion(write)
+        assert second.outcome is WriteOutcome.DUPLICATE
+
+        after = dict(
+            await pg_conn.fetchrow(
+                "SELECT * FROM book_node WHERE key_hi = $1 AND key_lo = $2",
+                fold_u64_to_i64(key.hi),
+                fold_u64_to_i64(key.lo),
+            )
+        )
+        assert after == before
+    finally:
+        await store.close()
+
+
+@pytest.mark.db
+async def test_insert_expansion_collision_reports_both_sfens_and_changes_nothing(
+    pg_scratch_database, pg_conn
+):
+    """Requirement 3.6: differing stored SFEN at the same key is a collision,
+    not a duplicate -- no edge is created, fields are unchanged, both SFEN
+    strings are reported."""
+    await _drop_book_tables(pg_conn)
+    config = _make_config(pg_scratch_database, connection_retry_limit=0)
+
+    store = await NodeStore.connect_and_prepare(config)
+    try:
+        key = PositionKey(9301, 9302)
+        first_write = ExpansionWrite(
+            key=key, sfen="original-sfen", apery_key=3, eval_win_rate=0.4, edges=_make_edges()
+        )
+        first = await store.insert_expansion(first_write)
+        assert first.outcome is WriteOutcome.COMMITTED
+
+        before = dict(
+            await pg_conn.fetchrow(
+                "SELECT * FROM book_node WHERE key_hi = $1 AND key_lo = $2",
+                fold_u64_to_i64(key.hi),
+                fold_u64_to_i64(key.lo),
+            )
+        )
+
+        colliding_write = ExpansionWrite(
+            key=key, sfen="different-sfen", apery_key=4, eval_win_rate=0.9, edges=[]
+        )
+        result = await store.insert_expansion(colliding_write)
+        assert result.outcome is WriteOutcome.COLLISION
+        assert result.existing_sfen == "original-sfen"
+        assert result.attempted_sfen == "different-sfen"
+        assert store.collision_count == 1
+        assert store.duplicate_count == 0
+
+        after = dict(
+            await pg_conn.fetchrow(
+                "SELECT * FROM book_node WHERE key_hi = $1 AND key_lo = $2",
+                fold_u64_to_i64(key.hi),
+                fold_u64_to_i64(key.lo),
+            )
+        )
+        assert after == before
+    finally:
+        await store.close()
+
+
+# ---------------------------------------------------------------------------
+# task 8.6: the coalescing backup accumulator and flush.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.db
+async def test_backup_deltas_visible_via_get_before_flush(pg_scratch_database, pg_conn):
+    await _drop_book_tables(pg_conn)
+    config = _make_config(pg_scratch_database, connection_retry_limit=0)
+
+    store = await NodeStore.connect_and_prepare(config)
+    try:
+        key = PositionKey(9401, 9402)
+        write = ExpansionWrite(
+            key=key, sfen="backup-node", apery_key=5, eval_win_rate=0.5, edges=_make_edges()
+        )
+        result = await store.insert_expansion(write)
+        assert result.outcome is WriteOutcome.COMMITTED
+
+        # Before any backup: visit_count is 0 (Requirement 4.5's invariant
+        # for a childless node reduces to visit_count == 0 + 1's edges'
+        # visit counts, i.e. just 0 here since no descent has completed).
+        _, view_before = await store.get(key)
+        assert view_before.visit_count == 0
+        assert int(view_before.edges[0]["visit_count"]) == 0
+
+        delta = BackupDelta(
+            key=key,
+            node_visit_delta=3,
+            node_value_delta=1.5,
+            flags_or=0,
+            edge_deltas={0x0083: (2, 1.0), 0x0102: (1, 0.5)},
+        )
+        store.backup([delta])
+
+        # Visible immediately, with no flush yet.
+        _, view_after = await store.get(key)
+        assert view_after.visit_count == 3
+        assert view_after.value_sum == pytest.approx(1.5)
+        by_move = {int(e["move16"]): e for e in view_after.edges}
+        assert int(by_move[0x0083]["visit_count"]) == 2
+        assert by_move[0x0083]["value_sum"] == pytest.approx(1.0)
+        assert int(by_move[0x0102]["visit_count"]) == 1
+        assert by_move[0x0102]["value_sum"] == pytest.approx(0.5)
+
+        # PostgreSQL itself is untouched before flush.
+        row = await pg_conn.fetchrow(
+            "SELECT visit_count, value_sum FROM book_node WHERE key_hi = $1 AND key_lo = $2",
+            fold_u64_to_i64(key.hi),
+            fold_u64_to_i64(key.lo),
+        )
+        assert row["visit_count"] == 0
+        assert row["value_sum"] == 0.0
+    finally:
+        await store.close()
+
+
+@pytest.mark.db
+async def test_flush_applies_accumulated_deltas_via_fallback_patch(pg_scratch_database, pg_conn):
+    await _drop_book_tables(pg_conn)
+    config = _make_config(pg_scratch_database, connection_retry_limit=0)
+
+    store = await NodeStore.connect_and_prepare(config)
+    try:
+        key = PositionKey(9501, 9502)
+        write = ExpansionWrite(
+            key=key, sfen="flush-node", apery_key=6, eval_win_rate=0.5, edges=_make_edges()
+        )
+        await store.insert_expansion(write)
+
+        store.backup(
+            [
+                BackupDelta(
+                    key=key,
+                    node_visit_delta=4,
+                    node_value_delta=2.0,
+                    flags_or=0x01,
+                    edge_deltas={0x0083: (4, 2.0)},
+                )
+            ]
+        )
+
+        await store.flush()
+
+        row = await pg_conn.fetchrow(
+            "SELECT visit_count, value_sum, flags, edges FROM book_node "
+            "WHERE key_hi = $1 AND key_lo = $2",
+            fold_u64_to_i64(key.hi),
+            fold_u64_to_i64(key.lo),
+        )
+        assert row["visit_count"] == 4
+        assert row["value_sum"] == pytest.approx(2.0)
+        assert row["flags"] & 0x01
+
+        from dlshogi.book import packed_edge as pe
+
+        edges = pe.decode_edges(bytes(row["edges"]))
+        by_move = {int(e["move16"]): e for e in edges}
+        assert int(by_move[0x0083]["visit_count"]) == 4
+        assert by_move[0x0083]["value_sum"] == pytest.approx(2.0)
+        assert int(by_move[0x0102]["visit_count"]) == 0
+
+        # The accumulator is drained after flush.
+        assert store._pending_backup == {}
+    finally:
+        await store.close()
+
+
+@pytest.mark.db
+async def test_backup_coalesces_repeated_deltas_for_same_node_and_edge(
+    pg_scratch_database, pg_conn
+):
+    await _drop_book_tables(pg_conn)
+    config = _make_config(pg_scratch_database, connection_retry_limit=0)
+
+    store = await NodeStore.connect_and_prepare(config)
+    try:
+        key = PositionKey(9601, 9602)
+        write = ExpansionWrite(
+            key=key, sfen="coalesce-node", apery_key=7, eval_win_rate=0.5, edges=_make_edges()
+        )
+        await store.insert_expansion(write)
+
+        # Five separate descents' worth of backup() calls, all touching
+        # the same node and the same edge, before any flush.
+        for _ in range(5):
+            store.backup(
+                [
+                    BackupDelta(
+                        key=key,
+                        node_visit_delta=1,
+                        node_value_delta=0.2,
+                        edge_deltas={0x0083: (1, 0.2)},
+                    )
+                ]
+            )
+
+        _, view = await store.get(key)
+        assert view.visit_count == 5
+        assert view.value_sum == pytest.approx(1.0)
+
+        await store.flush()
+
+        row = await pg_conn.fetchrow(
+            "SELECT visit_count, value_sum FROM book_node WHERE key_hi = $1 AND key_lo = $2",
+            fold_u64_to_i64(key.hi),
+            fold_u64_to_i64(key.lo),
+        )
+        assert row["visit_count"] == 5
+        assert row["value_sum"] == pytest.approx(1.0)
+    finally:
+        await store.close()
+
+
+@pytest.mark.db
+async def test_background_flusher_flushes_on_its_interval(pg_scratch_database, pg_conn):
+    await _drop_book_tables(pg_conn)
+    config = _make_config(pg_scratch_database, connection_retry_limit=0)
+
+    store = await NodeStore.connect_and_prepare(config)
+    try:
+        key = PositionKey(9701, 9702)
+        write = ExpansionWrite(
+            key=key, sfen="flusher-node", apery_key=8, eval_win_rate=0.5, edges=_make_edges()
+        )
+        await store.insert_expansion(write)
+
+        store.start_flusher()
+        try:
+            store.backup([BackupDelta(key=key, node_visit_delta=7, node_value_delta=3.5)])
+
+            # The flusher interval is 200ms; wait a bit longer than that
+            # for at least one tick, real-time (no virtual clock here
+            # since start_flusher schedules against the running loop's
+            # own asyncio primitives, not a NodeStore-owned loop.time()).
+            for _ in range(20):
+                await asyncio.sleep(0.05)
+                row = await pg_conn.fetchrow(
+                    "SELECT visit_count FROM book_node WHERE key_hi = $1 AND key_lo = $2",
+                    fold_u64_to_i64(key.hi),
+                    fold_u64_to_i64(key.lo),
+                )
+                if row["visit_count"] == 7:
+                    break
+            assert row["visit_count"] == 7
+        finally:
+            await store.stop_flusher()
+    finally:
+        await store.close()
+
+
+# ---------------------------------------------------------------------------
+# task 8.8: propagation writes, book_meta seq counters, stats, RSS release.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.db
+async def test_set_propagation_writes_and_reads_back(pg_scratch_database, pg_conn):
+    await _drop_book_tables(pg_conn)
+    config = _make_config(pg_scratch_database, connection_retry_limit=0)
+
+    store = await NodeStore.connect_and_prepare(config)
+    try:
+        key = PositionKey(9801, 9802)
+        write = ExpansionWrite(
+            key=key, sfen="prop-node", apery_key=9, eval_win_rate=0.5, edges=_make_edges()
+        )
+        await store.insert_expansion(write)
+
+        pass_id = await store.next_propagation_seq()
+        assert pass_id == 1
+
+        await store.set_propagation(
+            [PropagationWrite(key=key, prop_value=0.75, prop_best_move16=0x0083, prop_epoch=pass_id)]
+        )
+
+        row = await pg_conn.fetchrow(
+            "SELECT prop_value, prop_best_move16, prop_epoch FROM book_node "
+            "WHERE key_hi = $1 AND key_lo = $2",
+            fold_u64_to_i64(key.hi),
+            fold_u64_to_i64(key.lo),
+        )
+        assert row["prop_value"] == pytest.approx(0.75)
+        assert row["prop_best_move16"] == 0x0083
+        assert row["prop_epoch"] == pass_id
+
+        _, view = await store.get(key)
+        assert view.prop_value == pytest.approx(0.75)
+        assert view.prop_best_move16 == 0x0083
+
+        await store.mark_propagation_done(pass_id)
+        meta = await pg_conn.fetchrow("SELECT propagation_done_seq FROM book_meta WHERE id = 1")
+        assert meta["propagation_done_seq"] == pass_id
+
+        seq = await store.bump_search_write_seq()
+        assert seq == 1
+    finally:
+        await store.close()
+
+
+@pytest.mark.db
+async def test_stats_reports_latencies_and_cache_accounting(pg_scratch_database, pg_conn):
+    await _drop_book_tables(pg_conn)
+    config = _make_config(pg_scratch_database, connection_retry_limit=0)
+
+    store = await NodeStore.connect_and_prepare(config)
+    try:
+        key = PositionKey(9901, 9902)
+        write = ExpansionWrite(
+            key=key, sfen="stats-node", apery_key=10, eval_win_rate=0.5, edges=_make_edges()
+        )
+        await store.insert_expansion(write)
+        await store.get(key)
+        store.backup([BackupDelta(key=key, node_visit_delta=1, node_value_delta=0.1)])
+        await store.flush()
+
+        stats = store.stats()
+        assert stats.read_count >= 1
+        assert stats.write_count >= 2  # insert_expansion + flush
+        assert stats.read_latency_mean_s >= 0.0
+        assert stats.write_latency_mean_s >= 0.0
+        assert stats.cache_bytes == store.cache_bytes
+        assert stats.cache_budget_bytes == config.cache_budget
+        assert stats.duplicate_count == 0
+        assert stats.collision_count == 0
+    finally:
+        await store.close()
+
+
+@pytest.mark.db
+async def test_rss_release_evicts_cache_and_reports_event_without_losing_data(
+    pg_scratch_database, pg_conn
+):
+    await _drop_book_tables(pg_conn)
+    config = _make_config(pg_scratch_database, connection_retry_limit=0)
+
+    store = await NodeStore.connect_and_prepare(config)
+    try:
+        keys = [PositionKey(20_000 + i, 30_000 + i) for i in range(10)]
+        for i, key in enumerate(keys):
+            write = ExpansionWrite(
+                key=key, sfen=f"rss-node-{i}", apery_key=i, eval_win_rate=0.5, edges=_make_edges()
+            )
+            result = await store.insert_expansion(write)
+            assert result.outcome is WriteOutcome.COMMITTED
+            await store.get(key)  # populate the LRU
+
+        assert store.cache_bytes > 0
+        cache_before = store.cache_bytes
+
+        # Inject a fake RSS reading that is guaranteed to exceed the bound.
+        huge_rss = store.rss_bound_bytes() + 10_000_000
+        store.set_rss_reader(lambda: huge_rss)
+
+        released = store.check_rss_and_release()
+        assert released is True
+        assert store.cache_release_events == 1
+        assert store.cache_bytes < cache_before
+
+        # Every written record is still readable from PostgreSQL.
+        for i, key in enumerate(keys):
+            row = await pg_conn.fetchrow(
+                "SELECT sfen FROM book_node WHERE key_hi = $1 AND key_lo = $2",
+                fold_u64_to_i64(key.hi),
+                fold_u64_to_i64(key.lo),
+            )
+            assert row is not None
+            assert row["sfen"] == f"rss-node-{i}"
+
+        # A subsequent sample within bound reports no further release.
+        store.set_rss_reader(lambda: 0)
+        assert store.check_rss_and_release() is False
+        assert store.cache_release_events == 1
+    finally:
+        await store.close()
+
+
+# ---------------------------------------------------------------------------
+# task 8.10: the in-flight claim mirror and startup clearing.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.db
+async def test_clear_in_flight_claims_at_startup_returns_count_and_leaves_book_node_untouched(
+    pg_scratch_database, pg_conn
+):
+    await _drop_book_tables(pg_conn)
+    config = _make_config(pg_scratch_database, connection_retry_limit=0)
+
+    store = await NodeStore.connect_and_prepare(config)
+    try:
+        key = PositionKey(31_001, 31_002)
+        write = ExpansionWrite(
+            key=key, sfen="claim-node", apery_key=11, eval_win_rate=0.5, edges=_make_edges()
+        )
+        await store.insert_expansion(write)
+        before_row = dict(
+            await pg_conn.fetchrow(
+                "SELECT * FROM book_node WHERE key_hi = $1 AND key_lo = $2",
+                fold_u64_to_i64(key.hi),
+                fold_u64_to_i64(key.lo),
+            )
+        )
+
+        import datetime as dt
+
+        now = dt.datetime.now(dt.timezone.utc)
+        await pg_conn.execute(
+            "INSERT INTO in_flight_claim (key_hi, key_lo, process_id, worker_id, claimed_at) "
+            "VALUES ($1, $2, $3, $4, $5), ($6, $7, $3, $4, $5)",
+            1,
+            2,
+            100,
+            1,
+            now,
+            3,
+            4,
+        )
+        pre_count = await pg_conn.fetchval("SELECT count(*) FROM in_flight_claim")
+        assert pre_count == 2
+
+        cleared = await store.clear_in_flight_claims_at_startup()
+        assert cleared == 2
+
+        post_count = await pg_conn.fetchval("SELECT count(*) FROM in_flight_claim")
+        assert post_count == 0
+
+        after_row = dict(
+            await pg_conn.fetchrow(
+                "SELECT * FROM book_node WHERE key_hi = $1 AND key_lo = $2",
+                fold_u64_to_i64(key.hi),
+                fold_u64_to_i64(key.lo),
+            )
+        )
+        assert after_row == before_row
+    finally:
+        await store.close()
+
+
+@pytest.mark.db
+async def test_upsert_and_delete_in_flight_claims_round_trip(pg_scratch_database, pg_conn):
+    await _drop_book_tables(pg_conn)
+    config = _make_config(pg_scratch_database, connection_retry_limit=0)
+
+    store = await NodeStore.connect_and_prepare(config)
+    try:
+        import datetime as dt
+
+        now = dt.datetime.now(dt.timezone.utc)
+        key1 = PositionKey(41_001, 41_002)
+        key2 = PositionKey(41_003, 41_004)
+
+        await store.upsert_in_flight_claims(
+            [
+                (key1, 100, 1, now),
+                (key2, 100, 2, now),
+            ]
+        )
+
+        rows = await pg_conn.fetch("SELECT * FROM in_flight_claim ORDER BY worker_id")
+        assert len(rows) == 2
+        assert rows[0]["worker_id"] == 1
+        assert rows[0]["process_id"] == 100
+        assert rows[1]["worker_id"] == 2
+
+        # Re-upserting the same key updates in place rather than duplicating.
+        later = now + dt.timedelta(seconds=5)
+        await store.upsert_in_flight_claims([(key1, 100, 1, later)])
+        rows = await pg_conn.fetch("SELECT * FROM in_flight_claim")
+        assert len(rows) == 2
+
+        await store.delete_in_flight_claims([key1])
+        rows = await pg_conn.fetch("SELECT * FROM in_flight_claim")
+        assert len(rows) == 1
+        assert rows[0]["key_hi"] == fold_u64_to_i64(key2.hi)
     finally:
         await store.close()

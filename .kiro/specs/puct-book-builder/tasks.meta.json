@@ -107,6 +107,214 @@
         "chatSessionId": "sess_bd5a2dfa-bdd4-4598-a1cb-8dcbf63a1d90",
         "timestamp": 1787627384097
       }
+    ],
+    "8.1 Implement the expansion write": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628151506
+      },
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628278756
+      },
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787632203974
+      }
+    ],
+    "8.6 Implement the coalescing backup accumulator and flush": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628153170
+      },
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628698877
+      },
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787632204252
+      }
+    ],
+    "8.8 Implement propagation writes, stats, and cache release": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628154325
+      },
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628700299
+      },
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787632204501
+      }
+    ],
+    "8.10 Implement the in-flight claim mirror and startup clearing": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628155583
+      },
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628700517
+      },
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787632205153
+      }
+    ],
+    "9.1 Implement the extension": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628156815
+      }
+    ],
+    "9.2 Wire backend selection into the Node_Store": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628158065
+      }
+    ],
+    "10.1 Implement the batching Evaluator against an injectable session": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628158499
+      }
+    ],
+    "10.5 Wire the real onnxruntime session": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628159114
+      }
+    ],
+    "11.1 Implement `dlshogi/book/repetition.py`": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628160912
+      }
+    ],
+    "12.1 Implement `dlshogi/book/prior_mixer.py`": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628161575
+      }
+    ],
+    "12.3 Implement `dlshogi/book/terashock.py`": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628161960
+      }
+    ],
+    "13.1 Implement the In_Flight_Set and the claim reaper": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628162614
+      }
+    ],
+    "13.3 Implement PUCT selection": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628163944
+      }
+    ],
+    "13.6 Implement the descent task": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628165240
+      }
+    ],
+    "13.12 Implement the supervisor, resume, and shutdown": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628166998
+      }
+    ],
+    "14.2 Implement `dlshogi/book/propagate.py`": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628167615
+      }
+    ],
+    "15.1 Implement export phase 1 emission and filters": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628168323
+      }
+    ],
+    "15.4 Implement the external sort and the Apery writer": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628170137
+      }
+    ],
+    "15.6 Implement the YaneuraOu `.db` export path": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628170874
+      }
+    ],
+    "16.1 Implement `dlshogi/book/report.py`": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628172686
+      }
+    ],
+    "17.1 Wire `dlshogi/book/__main__.py` and the startup flow": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628173520
+      }
+    ],
+    "18. Checkpoint - full property suite green": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628174767
+      }
+    ],
+    "20. Final checkpoint": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787628175993
+      }
+    ],
+    "8. Node_Store write path": [
+      {
+        "executionId": "ca532768-1270-496c-bdfd-0bd014334547",
+        "chatSessionId": "sess_4ebc9d02-4841-43ca-aac5-dcb06df56c59",
+        "timestamp": 1787632206223
+      }
     ]
   }
 }

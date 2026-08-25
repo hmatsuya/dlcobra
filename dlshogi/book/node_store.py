@@ -6,14 +6,16 @@ schema creation/versioning/repair, Root_Position recording and read-back,
 the connection retry schedule, and the lost-connection suspension seam.
 
 **Scope.** The read path (`get`, `get_many`, `get_many_terminal_eval`, the
-node LRU) is added by task 7.6; the write path (`insert_expansion`, the
-backup accumulator, `flush`, `set_propagation`) is added by task 8.x. Both
-later tasks extend *this* class rather than replacing it, and both are
-meant to build on the reconnection seam (`_run`) this module exposes so
-they inherit lost-connection handling for free. This module's own scope --
-pool creation, schema management, versioning, retry, reconnection
-suspension, `synchronous_commit` -- is complete on its own and does not
-depend on either later task.
+node LRU) was added by task 7.6. The write path -- `insert_expansion`
+(task 8.1), the coalescing backup accumulator and `flush` (task 8.6),
+`set_propagation`/`stats`/the RSS sampler (task 8.8), and the in-flight
+claim mirror (task 8.10) -- is added by this module too, extending the
+same class rather than replacing it, and builds on the reconnection seam
+(`_run`) so every write inherits lost-connection handling for free. The
+`puct_edge` C extension backend of task 9 does not exist yet: `flush()`
+always uses the client-side fallback patch path
+(`_apply_backup_row`), which task 9.2 is meant to swap out later without
+`flush()` itself changing.
 
 **Startup sequencing** (design.md's "Error Handling" mermaid flowchart,
 nodes C4 through C17) is implemented by `NodeStore.connect` plus
@@ -45,10 +47,13 @@ operation happens inside an explicit `async def`, never at module import.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import enum
 import logging
+import time
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal, Optional, Sequence, TypeVar
 
@@ -89,6 +94,28 @@ _CONNECT_ATTEMPT_TIMEOUT_S = 5.0
 # each subsequent retry, up to this maximum wait per retry.
 _RETRY_INITIAL_WAIT_S = 1.0
 _RETRY_MAX_WAIT_S = 60.0
+
+# design.md's "The backup write path": "applies accumulated deltas to
+# PostgreSQL every flush_interval (default 200 ms)". BookConfig has no
+# dedicated field for this (see config.py's RANGE_TABLE), so this is a
+# module-level constant, matching this module's existing convention for
+# values design.md fixes rather than exposing as Operator configuration
+# (compare _SCHEMA_CREATION_TIMEOUT_S, _CONNECT_ATTEMPT_TIMEOUT_S above).
+_FLUSH_INTERVAL_S = 0.2
+
+# Requirement 15.4: resident memory sampled at intervals of at most 10 s.
+_RSS_SAMPLE_INTERVAL_S = 10.0
+
+# Requirement 15.4's bound: Cache_Budget + evaluator-init RSS + 512 MiB.
+_RSS_BOUND_OVERHEAD_BYTES = 512 * 1024 * 1024
+
+# Judgement call (task 8.6, "on Cache_Budget pressure"): with no
+# Search_Coordinator yet to drive an automatic poll, `cache_pressure_exceeded`
+# is exposed as a callable a future caller can check between the 200 ms
+# flusher interval ticks. Chosen as half of Cache_Budget, a deliberately
+# conservative threshold since the accumulator's own footprint is meant to
+# be a small fraction of Cache_Budget in practice.
+_CACHE_PRESSURE_FRACTION = 0.5
 
 # The three session roles a NodeStore instance may serve, each with its
 # own `synchronous_commit` setting (design.md, "Resumability makes the
@@ -448,6 +475,267 @@ class _NodeLRU:
     def __len__(self) -> int:
         return len(self._entries)
 
+    def invalidate(self, key: PositionKey) -> None:
+        """Drop ``key`` from the cache if present (used by `set_propagation`,
+        task 8.8, so a stale cached view is never served after a direct
+        `prop_value`/`prop_best_move16`/`prop_epoch` UPDATE that bypasses
+        the backup accumulator).
+        """
+        if key in self._entries:
+            self._total_bytes -= self._sizes.pop(key)
+            del self._entries[key]
+
+    def shrink_by(self, amount_bytes: int) -> None:
+        """Evict least-recently-used entries until at least ``amount_bytes``
+        of cache have been freed, or the cache is empty (task 8.8's RSS
+        sampler; Requirement 15.5). Never touches PostgreSQL: every
+        written Book_Node and Book_Edge record survives this call, only
+        the in-process cache shrinks.
+        """
+        if amount_bytes <= 0:
+            return
+        target = max(0, self._total_bytes - amount_bytes)
+        while self._total_bytes > target and self._entries:
+            evict_key, _ = self._entries.popitem(last=False)
+            self._total_bytes -= self._sizes.pop(evict_key)
+
+
+# ---------------------------------------------------------------------------
+# Write path types (task 8.1, 8.6, 8.8, 8.10): `ExpansionWrite`,
+# `WriteOutcome`, `WriteResult`, `BackupDelta`, `PropagationWrite`, `Stats`.
+#
+# design.md's Node_Store component sketch names these types
+# (`ExpansionWrite`, `WriteResult`, `BackupDelta`, `PropagationWrite`,
+# `Stats`) but does not spell out their fields; the shapes below are this
+# task's own design, chosen to be exactly what `insert_expansion`,
+# `backup`, and `set_propagation` need and no more.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ExpansionWrite:
+    """One Book_Node-plus-its-Book_Edges write, for `NodeStore.insert_expansion`.
+
+    ``edges`` is anything `packed_edge.encode_edges` accepts (a sequence of
+    mappings or attribute-holders exposing the `PACKED_EDGE` field names);
+    an empty sequence is legal (a terminal node has no edges, Requirement
+    8.11 / 8.6's own `terminal` field here). ``apery_key`` and ``key`` are
+    the *unsigned* 64-bit values; the two's-complement fold into signed
+    `bigint` happens inside `insert_expansion` itself, not here, matching
+    how `BookNodeView`/`_row_to_view` keep the unsigned form at this
+    module's public boundary.
+    """
+
+    key: PositionKey
+    sfen: str
+    apery_key: int
+    terminal: Terminal = Terminal.NONE
+    eval_win_rate: Optional[float] = None
+    edges: Sequence[Any] = ()
+
+
+class WriteOutcome(enum.Enum):
+    """The four distinguishable outcomes of `NodeStore.insert_expansion`.
+
+    ``COMMITTED``: this call's row was the one that survived the
+    ``ON CONFLICT DO NOTHING`` race (Requirement 1.6).
+    ``DUPLICATE``: another writer's row already existed with the *same*
+    SFEN; this is an ordinary transposition-merge loss (Requirement 11.6),
+    and re-applying an identical expansion also lands here (Requirement
+    10.4's idempotence).
+    ``COLLISION``: another writer's row already existed at the same
+    Position_Key but with a *different* SFEN (Requirement 3.6) -- a true
+    128-bit key collision, not a transposition.
+    ``FAILED``: the statement itself could not be completed (Requirement
+    1.9), e.g. a reconnect-exhaustion error re-raised by `self._run`.
+    """
+
+    COMMITTED = 1
+    DUPLICATE = 2
+    COLLISION = 3
+    FAILED = 4
+
+
+@dataclass
+class WriteResult:
+    """`NodeStore.insert_expansion`'s return value.
+
+    ``existing_sfen`` / ``attempted_sfen`` are populated for `DUPLICATE`
+    (``existing_sfen`` only, which equals the attempted SFEN by
+    definition) and for `COLLISION` (both, since they differ -- the whole
+    point of Requirement 3.6's report). ``error`` is populated only for
+    `FAILED`.
+    """
+
+    outcome: WriteOutcome
+    key: PositionKey
+    existing_sfen: Optional[str] = None
+    attempted_sfen: Optional[str] = None
+    error: Optional[BaseException] = None
+
+
+@dataclass
+class BackupDelta:
+    """One Book_Node's pending backup increments (`NodeStore.backup`, task 8.6).
+
+    ``edge_deltas`` maps ``move16 -> (visit_delta, value_delta)``. A
+    descent (or a later task's caller) constructs one `BackupDelta` per
+    Book_Node on its descent path and passes the whole path's list to one
+    `backup()` call; `backup()` merges each of these into the persistent
+    per-key accumulator entry of the same shape, so this same dataclass
+    doubles as the accumulator's own per-key storage.
+    """
+
+    key: PositionKey
+    node_visit_delta: int = 0
+    node_value_delta: float = 0.0
+    flags_or: int = 0
+    edge_deltas: dict[int, tuple[int, float]] = field(default_factory=dict)
+
+
+@dataclass
+class PropagationWrite:
+    """One Book_Node's `prop_value`/`prop_best_move16`/`prop_epoch` write.
+
+    Unlike `BackupDelta`, these are absolute values, not deltas
+    (Requirement 9's propagated value replaces, it does not accumulate),
+    so `set_propagation` issues a direct UPDATE rather than routing
+    through the visit/value accumulator (see design.md's "Value
+    propagation..." section; the accumulator's increment semantics do not
+    fit an absolute write). ``prop_epoch`` is the current propagation pass
+    id (`book_meta.propagation_seq`, obtained by the caller via
+    `NodeStore.next_propagation_seq()`), which is what makes the memo
+    lookup in a later pass a plain equality test.
+    """
+
+    key: PositionKey
+    prop_value: float
+    prop_best_move16: Optional[int]
+    prop_epoch: int
+
+
+@dataclass
+class Stats:
+    """`NodeStore.stats()`'s return value (task 8.8).
+
+    Latencies are seconds; ``*_count`` is the number of samples the mean
+    and p95 were computed from (0 means "no data yet", in which case the
+    mean/p95 fields read 0.0 rather than NaN -- see `_LatencyHistogram`).
+    """
+
+    read_latency_mean_s: float
+    read_latency_p95_s: float
+    read_count: int
+    write_latency_mean_s: float
+    write_latency_p95_s: float
+    write_count: int
+    cache_bytes: int
+    cache_budget_bytes: int
+    duplicate_count: int
+    collision_count: int
+    cache_release_events: int
+
+
+class _LatencyHistogram:
+    """A minimal read/write latency tracker: mean and p95 over recorded samples.
+
+    design.md's Progress_Reporter section describes "per-interval bucketed
+    histograms as numpy arrays, reset each interval"; `report.py` itself
+    (task 16.1) is not implemented yet, so this is a simpler in-process
+    tracker sufficient for `NodeStore.stats()` alone: an unbounded list of
+    per-call latencies in seconds, from which mean/p95 are computed on
+    demand via numpy. `reset()` is exposed so a future `report.py` can
+    apply the same "reset each Report_Interval" policy without this class
+    changing.
+    """
+
+    def __init__(self) -> None:
+        self._samples: list[float] = []
+
+    def record(self, seconds: float) -> None:
+        self._samples.append(seconds)
+
+    def reset(self) -> None:
+        self._samples = []
+
+    @property
+    def count(self) -> int:
+        return len(self._samples)
+
+    def mean(self) -> float:
+        return float(np.mean(self._samples)) if self._samples else 0.0
+
+    def p95(self) -> float:
+        return float(np.percentile(self._samples, 95)) if self._samples else 0.0
+
+
+def _default_rss_bytes() -> int:
+    """Read this process's current resident set size, in bytes.
+
+    Prefers ``/proc/self/status``'s ``VmRSS`` (Linux, matching this
+    repository's deployment target), which is *current* RSS. Falls back to
+    ``resource.getrusage(RUSAGE_SELF).ru_maxrss`` (KB on Linux) only when
+    ``/proc`` is unavailable; that fallback reports *peak*, not current,
+    RSS, so it is a last resort, not the primary path. No `psutil`
+    dependency is added, per this task's explicit instruction; `psutil` is
+    not in `Pipfile` and adding it was not authorized.
+    """
+    try:
+        with open("/proc/self/status", "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) * 1024
+    except OSError:
+        pass
+    try:
+        import resource
+
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
+    except Exception:  # noqa: BLE001 - RSS accounting must never crash the caller
+        return 0
+
+
+def _apply_pending_to_view(
+    view: BookNodeView, pending: Optional[BackupDelta]
+) -> BookNodeView:
+    """Overlay a pending (unflushed) `BackupDelta` onto a `BookNodeView`.
+
+    Requirement 4.5's visit-count invariant must hold on *read*, before any
+    flush; this is what makes that true for `get`/`get_many`. Returns
+    ``view`` itself, unmodified, when ``pending`` is `None` or carries no
+    actual delta (the common case -- most reads find nothing pending),
+    so callers that never touch the write path pay no allocation cost.
+    Otherwise returns a new `BookNodeView` (via `dataclasses.replace`) with
+    a freshly copied, patched ``edges`` array; the cached/decoded array
+    itself is never mutated in place, since it may be shared by other
+    readers (the node LRU, or a concurrent `get` of the same key).
+    """
+    if pending is None or (
+        pending.node_visit_delta == 0
+        and pending.node_value_delta == 0.0
+        and pending.flags_or == 0
+        and not pending.edge_deltas
+    ):
+        return view
+
+    edges = view.edges
+    if pending.edge_deltas:
+        edges = edges.copy()
+        index_by_move16 = {int(m16): i for i, m16 in enumerate(edges["move16"])}
+        for move16, (visit_delta, value_delta) in pending.edge_deltas.items():
+            i = index_by_move16.get(int(move16))
+            if i is not None:
+                edges[i]["visit_count"] = edges[i]["visit_count"] + visit_delta
+                edges[i]["value_sum"] = edges[i]["value_sum"] + value_delta
+
+    return dataclasses.replace(
+        view,
+        visit_count=view.visit_count + pending.node_visit_delta,
+        value_sum=view.value_sum + pending.node_value_delta,
+        cyclic_flag=view.cyclic_flag or bool(pending.flags_or & _FLAG_CYCLIC),
+        edges=edges,
+    )
+
 
 class NodeStore:
     """Node_Store: PostgreSQL-backed Book_Graph storage.
@@ -486,13 +774,30 @@ class NodeStore:
         # by `get_many_terminal_eval` (that method's whole point is to skip
         # the cache for below-threshold propagation children).
         self._cache = _NodeLRU(int(self._config.cache_budget))
-        # Pending backup accumulator (task 8.6, not yet implemented): once
-        # added, `get` will consult this dict (keyed by PositionKey, holding
-        # uncommitted visit/value deltas) between the LRU check and the
-        # PostgreSQL query, so uncommitted increments are visible on read
-        # (design.md's Node_Store section; Requirement 4.5). Declared here,
-        # empty, purely as task 8.6's extension point.
-        self._pending_backup: dict[PositionKey, Any] = {}
+        # Pending backup accumulator (task 8.6): keyed by PositionKey,
+        # holding uncommitted node/edge visit and value deltas. `get`
+        # overlays this on top of whatever base row it finds (cache or
+        # PostgreSQL), so uncommitted increments are visible on read
+        # (Requirement 4.5). Populated by `backup()`, drained by `flush()`.
+        self._pending_backup: dict[PositionKey, "BackupDelta"] = {}
+
+        # -- task 8.1: expansion write counters (Requirement 11.6, 3.6) ----
+        self.duplicate_count = 0
+        self.collision_count = 0
+
+        # -- task 8.6: flusher lifecycle -----------------------------------
+        self._flusher_task: Optional[asyncio.Task] = None
+        self._flusher_stop_event: Optional[asyncio.Event] = None
+
+        # -- task 8.8: stats, RSS sampler ----------------------------------
+        self._read_latency = _LatencyHistogram()
+        self._write_latency = _LatencyHistogram()
+        self._evaluator_baseline_rss_bytes = 0
+        self._rss_reader: Callable[[], int] = _default_rss_bytes
+        self.cache_release_events = 0
+        self._on_cache_release: Optional[Callable[[], None]] = None
+        self._rss_task: Optional[asyncio.Task] = None
+        self._rss_stop_event: Optional[asyncio.Event] = None
 
     # -- connection settings, from BookConfig ---------------------------
 
@@ -887,9 +1192,10 @@ class NodeStore:
 
         1. the node LRU -- a hit returns `(GetResult.FOUND, view)` directly,
            with no PostgreSQL round trip;
-        2. the pending backup accumulator -- not yet implemented (task 8.6
-           adds it); see the `# TODO(task 8.6)` marker below for exactly
-           where that lookup belongs;
+        2. the pending backup accumulator -- any uncommitted delta for
+           ``key`` is overlaid onto whatever base view was found (LRU hit
+           or PostgreSQL row), via `_apply_pending_to_view` (Requirement
+           4.5);
         3. PostgreSQL -- a single-row primary-key `SELECT`. No row found
            means `(GetResult.ABSENT, None)`; this path issues no INSERT and
            no UPDATE, satisfying Requirement 1.4 by construction. A row
@@ -903,14 +1209,17 @@ class NodeStore:
         outcome (unlike `get_many`/`get_many_terminal_eval`, whose return
         types have no equivalent slot -- see those methods' docstrings).
         """
+        start = time.monotonic()
         cached = self._cache.get(key)
         if cached is not None:
-            return GetResult.FOUND, cached
+            view = _apply_pending_to_view(cached, self._pending_backup.get(key))
+            self._read_latency.record(time.monotonic() - start)
+            return GetResult.FOUND, view
 
-        # TODO(task 8.6): consult self._pending_backup here, between the
-        # LRU check above and the PostgreSQL query below, once the backup
-        # accumulator exists, so uncommitted increments are visible on
-        # read (Requirement 4.5).
+        # Requirement 4.5: uncommitted deltas merged by `backup()` but not
+        # yet flushed must be visible on read. Consulted here, between the
+        # LRU check above and the PostgreSQL query below.
+        pending = self._pending_backup.get(key)
 
         key_hi = fold_u64_to_i64(key.hi)
         key_lo = fold_u64_to_i64(key.lo)
@@ -932,10 +1241,13 @@ class NodeStore:
             return GetResult.FAILED, None
 
         if row is None:
+            self._read_latency.record(time.monotonic() - start)
             return GetResult.ABSENT, None
 
         view = _row_to_view(row)
         self._cache.put(key, view)
+        view = _apply_pending_to_view(view, pending)
+        self._read_latency.record(time.monotonic() - start)
         return GetResult.FOUND, view
 
     async def get_many(self, keys: Sequence[PositionKey]) -> list[Optional[BookNodeView]]:
@@ -1038,32 +1350,664 @@ class NodeStore:
             result.append(by_folded_key.get((key_hi, key_lo)))
         return result
 
-    # -- write path stubs, filled in by task 8.x --------------------------
-    #
-    # The following methods are intentionally unimplemented here. Their
-    # signatures are given (from design.md's Node_Store component sketch)
-    # so the intended public class shape is visible early; task 8.x fills
-    # in the write path on this same class.
+    # -- write path (task 8.1): the atomic expansion write ---------------
 
-    async def insert_expansion(self, w):  # noqa: ANN001 - ExpansionWrite, task 8.1
-        """TODO(task 8.1): the atomic `INSERT ... ON CONFLICT DO NOTHING`."""
-        raise NotImplementedError("Node_Store.insert_expansion is implemented by task 8.1")
+    async def insert_expansion(self, w: ExpansionWrite) -> WriteResult:
+        """The atomic `INSERT ... ON CONFLICT (key_hi, key_lo) DO NOTHING`.
 
-    def backup(self, deltas):  # noqa: ANN001 - Sequence[BackupDelta], task 8.6
-        """TODO(task 8.6): merge deltas into the in-process accumulator."""
-        raise NotImplementedError("Node_Store.backup is implemented by task 8.6")
+        One row carries the node and every one of its edges, so "node plus
+        every edge, or nothing" (Requirement 1.6, 10.3) is a property of
+        this single row insert -- there is no second statement that could
+        half-apply. An empty ``RETURNING`` means another task or another
+        process's row already exists at this Position_Key; this method
+        then reads that retained row's SFEN back and distinguishes:
+
+        - the retained SFEN matches ``w.sfen`` -> `WriteOutcome.DUPLICATE`
+          (Requirement 11.6: an ordinary transposition-merge loss, or a
+          re-application of the identical expansion, Requirement 10.4's
+          idempotence); the duplicate counter is incremented, the retained
+          row's evaluation fields are left untouched (this method issues
+          no UPDATE on this path at all), and neither caller is made to
+          fail;
+        - the retained SFEN differs from ``w.sfen`` -> `WriteOutcome.COLLISION`
+          (Requirement 3.6): no Book_Edge referencing that row is created
+          by this method's caller (this method creates none either way --
+          edge creation is the caller's business, this method only writes
+          the row), the retained row's fields are left unchanged, and both
+          SFEN strings are reported via the returned `WriteResult`.
+
+        A statement-execution error (reconnect exhaustion or otherwise,
+        re-raised by `self._run`) is reported as `WriteOutcome.FAILED`
+        rather than propagated, matching Requirement 1.9's write-failure
+        result naming the Position_Key; no partial row is left behind,
+        since the `INSERT` either commits whole or not at all.
+        """
+        start = time.monotonic()
+        key_hi = fold_u64_to_i64(w.key.hi)
+        key_lo = fold_u64_to_i64(w.key.lo)
+        apery_key = fold_u64_to_i64(w.apery_key)
+        edges_blob = packed_edge.encode_edges(w.edges)
+        edge_count = len(w.edges)
+
+        async def _do_insert(pool: asyncpg.Pool) -> Optional[asyncpg.Record]:
+            async with pool.acquire() as conn:
+                return await conn.fetchrow(
+                    "INSERT INTO book_node (key_hi, key_lo, sfen, apery_key, terminal, "
+                    "eval_win_rate, edge_count, edges) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) "
+                    "ON CONFLICT (key_hi, key_lo) DO NOTHING "
+                    "RETURNING key_hi",
+                    key_hi,
+                    key_lo,
+                    w.sfen,
+                    apery_key,
+                    w.terminal.value,
+                    w.eval_win_rate,
+                    edge_count,
+                    edges_blob,
+                )
+
+        try:
+            row = await self._run(_do_insert)
+        except Exception as exc:  # noqa: BLE001 - FAILED is a real return value (Req 1.9)
+            _LOG.error("Node_Store.insert_expansion(%r) failed: %r", w.key, exc)
+            self._write_latency.record(time.monotonic() - start)
+            return WriteResult(outcome=WriteOutcome.FAILED, key=w.key, error=exc)
+
+        if row is not None:
+            # This call's row is the one that survived the race.
+            self._write_latency.record(time.monotonic() - start)
+            return WriteResult(outcome=WriteOutcome.COMMITTED, key=w.key)
+
+        # Empty RETURNING: another writer's row already exists. Read it
+        # back to distinguish an ordinary duplicate from a Position_Key
+        # collision (Requirement 3.6) -- ON CONFLICT DO NOTHING alone
+        # cannot tell the two apart.
+        async def _do_read_existing(pool: asyncpg.Pool) -> Optional[asyncpg.Record]:
+            async with pool.acquire() as conn:
+                return await conn.fetchrow(
+                    "SELECT sfen FROM book_node WHERE key_hi = $1 AND key_lo = $2",
+                    key_hi,
+                    key_lo,
+                )
+
+        try:
+            existing = await self._run(_do_read_existing)
+        except Exception as exc:  # noqa: BLE001 - see above
+            _LOG.error(
+                "Node_Store.insert_expansion(%r) failed reading the retained row: %r",
+                w.key,
+                exc,
+            )
+            self._write_latency.record(time.monotonic() - start)
+            return WriteResult(outcome=WriteOutcome.FAILED, key=w.key, error=exc)
+
+        self._write_latency.record(time.monotonic() - start)
+        if existing is None:
+            # Vanishingly unlikely (the row we just lost the race to was
+            # deleted between the INSERT and this SELECT); treat as a
+            # duplicate rather than crash the caller.
+            self.duplicate_count += 1
+            return WriteResult(outcome=WriteOutcome.DUPLICATE, key=w.key, existing_sfen=w.sfen)
+
+        existing_sfen = existing["sfen"]
+        if existing_sfen == w.sfen:
+            self.duplicate_count += 1
+            return WriteResult(
+                outcome=WriteOutcome.DUPLICATE, key=w.key, existing_sfen=existing_sfen
+            )
+
+        self.collision_count += 1
+        _LOG.warning(
+            "Node_Store.insert_expansion: Position_Key collision at %r: "
+            "existing sfen=%r, attempted sfen=%r",
+            w.key,
+            existing_sfen,
+            w.sfen,
+        )
+        return WriteResult(
+            outcome=WriteOutcome.COLLISION,
+            key=w.key,
+            existing_sfen=existing_sfen,
+            attempted_sfen=w.sfen,
+        )
+
+    # -- write path (task 8.6): the coalescing backup accumulator --------
+
+    def backup(self, deltas: Sequence[BackupDelta]) -> None:
+        """Merge ``deltas`` into the in-process accumulator.
+
+        Deliberately a plain ``def``, not ``async def`` (design.md: "no
+        `await` sits between a descent's completion and its deltas
+        becoming visible to `get`"). Increments are commutative and
+        associative, so merging is exactly equivalent to applying them one
+        at a time in any order (Requirement 11.5's confluence, Requirement
+        11.8's no-lost-update invariant over the coalesced result).
+
+        Each `BackupDelta` in ``deltas`` is merged into
+        ``self._pending_backup[delta.key]``, creating that entry if
+        absent: node visit/value deltas add, ``flags_or`` ORs, and
+        per-``move16`` edge deltas add component-wise (creating the
+        per-edge entry if this is the first delta seen for that edge).
+        """
+        for delta in deltas:
+            existing = self._pending_backup.get(delta.key)
+            if existing is None:
+                # Copy the incoming delta's edge_deltas dict rather than
+                # aliasing it, so a caller that reuses/mutates its own
+                # BackupDelta after calling backup() cannot corrupt the
+                # accumulator.
+                self._pending_backup[delta.key] = BackupDelta(
+                    key=delta.key,
+                    node_visit_delta=delta.node_visit_delta,
+                    node_value_delta=delta.node_value_delta,
+                    flags_or=delta.flags_or,
+                    edge_deltas=dict(delta.edge_deltas),
+                )
+                continue
+            existing.node_visit_delta += delta.node_visit_delta
+            existing.node_value_delta += delta.node_value_delta
+            existing.flags_or |= delta.flags_or
+            for move16, (visit_delta, value_delta) in delta.edge_deltas.items():
+                prev_v, prev_w = existing.edge_deltas.get(move16, (0, 0.0))
+                existing.edge_deltas[move16] = (prev_v + visit_delta, prev_w + value_delta)
+
+    def _estimated_pending_bytes(self) -> int:
+        """A rough byte estimate of the pending accumulator, for the
+        Cache_Budget-pressure flush trigger below. Not used for anything
+        that needs to be exact.
+        """
+        total = 0
+        for delta in self._pending_backup.values():
+            total += 64 + 24 * len(delta.edge_deltas)
+        return total
+
+    def cache_pressure_exceeded(self) -> bool:
+        """Whether the pending accumulator's estimated size suggests an
+        out-of-band flush is warranted (design.md's "on Cache_Budget
+        pressure" flush trigger).
+
+        There is no Search_Coordinator yet (task 13) to poll this on a
+        schedule, so it is exposed as a plain predicate a future caller
+        can check; the 200 ms interval flusher (`start_flusher`) already
+        covers the steady-state case on its own. See the
+        `_CACHE_PRESSURE_FRACTION` module constant for the threshold and
+        the judgement call it documents.
+        """
+        budget = int(self._config.cache_budget)
+        return self._estimated_pending_bytes() > _CACHE_PRESSURE_FRACTION * budget
 
     async def flush(self) -> None:
-        """TODO(task 8.6): flush the accumulator to PostgreSQL."""
-        raise NotImplementedError("Node_Store.flush is implemented by task 8.6")
+        """Apply every pending accumulator delta to PostgreSQL, then clear it.
 
-    async def set_propagation(self, w):  # noqa: ANN001 - Sequence[PropagationWrite], task 8.8
-        """TODO(task 8.8): write `prop_value`/`prop_best_move16`/`prop_epoch`."""
-        raise NotImplementedError("Node_Store.set_propagation is implemented by task 8.8")
+        Snapshots and replaces ``self._pending_backup`` in one synchronous
+        step (no `await` on that line), so deltas merged by a concurrent
+        `backup()` call *during* this flush accumulate into the new,
+        now-current dict rather than being lost from the one being
+        written (design.md: "that swap is the one line of the flusher
+        that must not contain an `await`").
 
-    def stats(self):
-        """TODO(task 8.8): read/write latency histograms and cache accounting."""
-        raise NotImplementedError("Node_Store.stats is implemented by task 8.8")
+        Applies the snapshot as one `UPDATE` per node inside one
+        transaction, using the client-side fallback patch path (`SELECT
+        edges ... FOR UPDATE`, `packed_edge.patch_edges`, `UPDATE ... SET
+        edges = $n`) via `_apply_backup_row`, since the `puct_edge` C
+        extension of task 9 does not exist yet. `_apply_backup_row` is a
+        private seam precisely so task 9.2 can later swap in the
+        extension path (a single in-database `UPDATE` using
+        `puct_edge_backup`) without this method changing.
+
+        A node present in the snapshot but absent from `book_node` (its
+        expansion write has not yet committed, or was lost) is skipped
+        rather than raising: the deltas for that key remain lost only in
+        the sense that a descent that walked through an unexpanded node is
+        not possible by construction (the node was created by
+        `insert_expansion` before any descent could select an edge under
+        it), so this is a defensive no-op, not an expected path.
+        """
+        snapshot = self._pending_backup
+        self._pending_backup = {}
+
+        if not snapshot:
+            return
+
+        start = time.monotonic()
+
+        async def _do_flush(pool: asyncpg.Pool) -> None:
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    for delta in snapshot.values():
+                        await self._apply_backup_row(conn, delta)
+
+        try:
+            await self._run(_do_flush)
+        except Exception:
+            # A failed flush re-merges the snapshot back into the live
+            # accumulator (rather than silently dropping it), so the next
+            # flush attempt retries the same deltas; get() continues to
+            # see them via the pending-accumulator overlay in the
+            # meantime. This is consistent with Requirement 2.9: a
+            # connection loss suspends operations and resumes them, it
+            # does not discard already-backed-up-in-memory deltas.
+            self.backup(list(snapshot.values()))
+            self._write_latency.record(time.monotonic() - start)
+            raise
+        self._write_latency.record(time.monotonic() - start)
+
+    async def _apply_backup_row(self, conn: asyncpg.Connection, delta: BackupDelta) -> None:
+        """Apply one node's accumulated deltas, via the client-side fallback patch.
+
+        `SELECT edges FROM book_node WHERE key_hi = $1 AND key_lo = $2 FOR
+        UPDATE`, patch client-side with `packed_edge.patch_edges`, then one
+        `UPDATE ... SET visit_count = visit_count + $, value_sum =
+        value_sum + $, flags = flags | $, edges = $n`, all within the
+        caller's transaction. The `FOR UPDATE` row lock is what gives the
+        same no-lost-update guarantee the in-database `puct_edge_backup`
+        path (task 9) gives, at the cost of one extra round trip per node
+        per flush (design.md's "The backup write path", paragraph 2's
+        fallback note).
+
+        This is the seam task 9.2 is meant to swap out: a backend-selecting
+        `flush()` would call either this method or an extension-path
+        equivalent per node, chosen once at startup. No such selection
+        exists yet -- this method is always used.
+        """
+        key_hi = fold_u64_to_i64(delta.key.hi)
+        key_lo = fold_u64_to_i64(delta.key.lo)
+
+        row = await conn.fetchrow(
+            "SELECT edges FROM book_node WHERE key_hi = $1 AND key_lo = $2 FOR UPDATE",
+            key_hi,
+            key_lo,
+        )
+        if row is None:
+            _LOG.warning(
+                "Node_Store.flush: no book_node row for %r; dropping %d pending "
+                "delta(s) for an unexpanded node",
+                delta.key,
+                1 + len(delta.edge_deltas),
+            )
+            return
+
+        edges_blob = bytes(row["edges"])
+        if delta.edge_deltas:
+            move16s = list(delta.edge_deltas.keys())
+            visit_deltas = [delta.edge_deltas[m][0] for m in move16s]
+            value_deltas = [delta.edge_deltas[m][1] for m in move16s]
+            edges_blob = packed_edge.patch_edges(edges_blob, move16s, visit_deltas, value_deltas)
+
+        await conn.execute(
+            "UPDATE book_node SET visit_count = visit_count + $3, "
+            "value_sum = value_sum + $4, flags = flags | $5, edges = $6 "
+            "WHERE key_hi = $1 AND key_lo = $2",
+            key_hi,
+            key_lo,
+            delta.node_visit_delta,
+            delta.node_value_delta,
+            delta.flags_or,
+            edges_blob,
+        )
+        # The row this flush just wrote may be cached; invalidate so the
+        # next get() re-reads the committed row rather than serving a
+        # stale cached copy now that the pending overlay for this key has
+        # been cleared (the snapshot dict backup() built this delta from
+        # was already swapped out before flush() started applying it).
+        self._cache.invalidate(delta.key)
+
+    # -- flusher lifecycle (task 8.6): 200 ms interval, and on stop -------
+
+    def start_flusher(self) -> None:
+        """Start the background flusher coroutine (idempotent).
+
+        Wakes every `_FLUSH_INTERVAL_S` (200 ms, design.md's
+        `flush_interval` default) and calls `flush()`. There is no
+        Search_Coordinator yet (task 13) to start this automatically, so a
+        caller (a test, or a later task's supervisor) must call this
+        explicitly; `NodeStore` does not start it on `connect()` or
+        `ensure_schema()`, since a `propagate`/`export`-role instance has
+        no use for it at all.
+        """
+        if self._flusher_task is not None and not self._flusher_task.done():
+            return
+        self._flusher_stop_event = asyncio.Event()
+        self._flusher_task = asyncio.ensure_future(
+            self._flusher_loop(self._flusher_stop_event)
+        )
+
+    async def stop_flusher(self) -> None:
+        """Stop the background flusher, flushing any remaining deltas first.
+
+        Requirement 10.5's "flush pending writes ... and exit": this
+        method's own final `flush()` call is what a caller's stop-request
+        handling is meant to await before considering the accumulator
+        drained.
+        """
+        if self._flusher_stop_event is not None:
+            self._flusher_stop_event.set()
+        if self._flusher_task is not None:
+            await self._flusher_task
+            self._flusher_task = None
+        await self.flush()
+
+    async def _flusher_loop(self, stop_event: asyncio.Event) -> None:
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=_FLUSH_INTERVAL_S)
+            except asyncio.TimeoutError:
+                pass
+            try:
+                await self.flush()
+            except Exception:  # noqa: BLE001 - the flusher must keep running
+                _LOG.exception("Node_Store background flusher: flush() failed")
+
+    # -- write path (task 8.8): propagation writes ------------------------
+
+    async def set_propagation(self, w: Sequence[PropagationWrite]) -> None:
+        """Write `prop_value`/`prop_best_move16`/`prop_epoch` for every entry of ``w``.
+
+        These are absolute values, not deltas (unlike `backup`'s
+        increment semantics), so this issues a direct `UPDATE` per node --
+        batched as one `executemany` inside one transaction -- rather than
+        routing through the visit/value accumulator (see this module's
+        `PropagationWrite` docstring). Propagation writes run under the
+        `role="propagate"` session's `synchronous_commit = on`, set at the
+        connection level by `NodeStore.__init__`/`connect`, not by this
+        method.
+        """
+        if not w:
+            return
+
+        start = time.monotonic()
+        args = [
+            (
+                fold_u64_to_i64(entry.key.hi),
+                fold_u64_to_i64(entry.key.lo),
+                entry.prop_value,
+                entry.prop_best_move16,
+                entry.prop_epoch,
+            )
+            for entry in w
+        ]
+
+        async def _do_set_propagation(pool: asyncpg.Pool) -> None:
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.executemany(
+                        "UPDATE book_node SET prop_value = $3, prop_best_move16 = $4, "
+                        "prop_epoch = $5 WHERE key_hi = $1 AND key_lo = $2",
+                        args,
+                    )
+
+        await self._run(_do_set_propagation)
+        for entry in w:
+            self._cache.invalidate(entry.key)
+        self._write_latency.record(time.monotonic() - start)
+
+    async def next_propagation_seq(self) -> int:
+        """Advance and return `book_meta.propagation_seq` (the next pass id).
+
+        A propagation pass calls this once at its own start to obtain the
+        `prop_epoch` value it will write via `set_propagation`
+        (design.md's "Value propagation..." section: "Memo in the database
+        via `prop_epoch = pass_id` from `book_meta.propagation_seq`").
+        """
+
+        async def _do_bump(pool: asyncpg.Pool) -> int:
+            async with pool.acquire() as conn:
+                return await conn.fetchval(
+                    "UPDATE book_meta SET propagation_seq = propagation_seq + 1 "
+                    "WHERE id = 1 RETURNING propagation_seq"
+                )
+
+        return await self._run(_do_bump)
+
+    async def mark_propagation_done(self, pass_id: int) -> None:
+        """Record that propagation pass ``pass_id`` has completed.
+
+        Sets `book_meta.propagation_done_seq = pass_id`, which is what
+        lets a later export (Requirement 12.9's staleness check,
+        `prop_epoch <> propagation_done_seq`) tell a fully-propagated
+        graph from one with a partial or superseded pass.
+        """
+
+        async def _do_mark(pool: asyncpg.Pool) -> None:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE book_meta SET propagation_done_seq = $1 WHERE id = 1", pass_id
+                )
+
+        await self._run(_do_mark)
+
+    async def bump_search_write_seq(self) -> int:
+        """Advance and return `book_meta.search_write_seq`.
+
+        Incremented by the search side whenever it commits a write that
+        would make a previously completed propagation pass stale (an
+        expansion or a backup); a later export's staleness warning
+        (Requirement 12.9's "or `search_write_seq > propagation_done_seq`")
+        compares this against `propagation_done_seq`. No caller in this
+        task's scope invokes this yet (task 13's Search_Coordinator will);
+        it is provided here purely as the `book_meta` maintenance helper
+        design.md's schema implies.
+        """
+
+        async def _do_bump(pool: asyncpg.Pool) -> int:
+            async with pool.acquire() as conn:
+                return await conn.fetchval(
+                    "UPDATE book_meta SET search_write_seq = search_write_seq + 1 "
+                    "WHERE id = 1 RETURNING search_write_seq"
+                )
+
+        return await self._run(_do_bump)
+
+    # -- write path (task 8.8): stats --------------------------------------
+
+    def stats(self) -> Stats:
+        """Read/write latency histograms and cache byte accounting."""
+        return Stats(
+            read_latency_mean_s=self._read_latency.mean(),
+            read_latency_p95_s=self._read_latency.p95(),
+            read_count=self._read_latency.count,
+            write_latency_mean_s=self._write_latency.mean(),
+            write_latency_p95_s=self._write_latency.p95(),
+            write_count=self._write_latency.count,
+            cache_bytes=self.cache_bytes,
+            cache_budget_bytes=int(self._config.cache_budget),
+            duplicate_count=self.duplicate_count,
+            collision_count=self.collision_count,
+            cache_release_events=self.cache_release_events,
+        )
+
+    # -- write path (task 8.8): RSS sampler and cache release -------------
+
+    def set_evaluator_baseline_rss(self, rss_bytes: int) -> None:
+        """Record the resident memory at completion of Evaluator initialization.
+
+        Requirement 15.4's bound is `Cache_Budget + evaluator RSS + 512
+        MiB`. No Evaluator exists yet (task 10), so this value defaults to
+        0 and is meant to be set once, right after a future Evaluator
+        finishes initializing, by whatever code drives that
+        initialization (task 13's Search_Coordinator, or a test).
+        """
+        self._evaluator_baseline_rss_bytes = int(rss_bytes)
+
+    def set_rss_reader(self, reader: Callable[[], int]) -> None:
+        """Replace the RSS-reading callable (a test seam).
+
+        Defaults to `_default_rss_bytes` (real `/proc/self/status` /
+        `resource.getrusage` reading). A test injects a callable
+        returning a fixed value here to exercise the eviction path
+        without needing the process's actual RSS to cross the bound.
+        """
+        self._rss_reader = reader
+
+    def set_on_cache_release(self, callback: Optional[Callable[[], None]]) -> None:
+        """Register a callback invoked once per cache-release event.
+
+        `report.py`'s real Progress_Reporter does not exist yet (task
+        16.1); `cache_release_events` (a plain counter) is always
+        incremented, and this callback is an additional, optional hook a
+        caller (a test, or a future Progress_Reporter) can observe events
+        through without polling the counter.
+        """
+        self._on_cache_release = callback
+
+    def rss_bound_bytes(self) -> int:
+        """Requirement 15.4's bound: Cache_Budget + evaluator RSS + 512 MiB."""
+        return (
+            int(self._config.cache_budget)
+            + self._evaluator_baseline_rss_bytes
+            + _RSS_BOUND_OVERHEAD_BYTES
+        )
+
+    def check_rss_and_release(self) -> bool:
+        """Take one RSS sample; evict from the node LRU if it exceeds the bound.
+
+        Requirement 15.5: releases cached Book_Node/Book_Edge records
+        (never anything already written to PostgreSQL) until the *cache*
+        no longer accounts for the excess, reports a cache-release event,
+        and returns whether a release happened. One sample only shrinks
+        the in-process cache; it does not itself guarantee the *next* RSS
+        sample will be within bound (RSS includes far more than this
+        cache), which is why the RSS sampler loop below keeps sampling
+        rather than treating one release as sufficient -- matching
+        Requirement 15.5's own wording, "until a subsequent sample is at
+        or below that bound".
+        """
+        rss = self._rss_reader()
+        bound = self.rss_bound_bytes()
+        if rss <= bound:
+            return False
+        excess = rss - bound
+        self._cache.shrink_by(excess)
+        self.cache_release_events += 1
+        if self._on_cache_release is not None:
+            self._on_cache_release()
+        return True
+
+    def start_rss_sampler(self, interval_s: float = _RSS_SAMPLE_INTERVAL_S) -> None:
+        """Start the background RSS sampler (idempotent).
+
+        Samples at most every `_RSS_SAMPLE_INTERVAL_S` (10 s, Requirement
+        15.4's "at intervals of at most 10 seconds"); a caller may pass a
+        shorter ``interval_s`` for testing. Like `start_flusher`, there is
+        no Search_Coordinator yet to start this automatically, so a caller
+        must call this explicitly.
+        """
+        if self._rss_task is not None and not self._rss_task.done():
+            return
+        self._rss_stop_event = asyncio.Event()
+        self._rss_task = asyncio.ensure_future(
+            self._rss_sampler_loop(self._rss_stop_event, interval_s)
+        )
+
+    async def stop_rss_sampler(self) -> None:
+        """Stop the background RSS sampler."""
+        if self._rss_stop_event is not None:
+            self._rss_stop_event.set()
+        if self._rss_task is not None:
+            await self._rss_task
+            self._rss_task = None
+
+    async def _rss_sampler_loop(self, stop_event: asyncio.Event, interval_s: float) -> None:
+        while not stop_event.is_set():
+            try:
+                self.check_rss_and_release()
+            except Exception:  # noqa: BLE001 - the sampler must keep running
+                _LOG.exception("Node_Store RSS sampler: check_rss_and_release() failed")
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval_s)
+            except asyncio.TimeoutError:
+                pass
+
+    # -- write path (task 8.10): in-flight claim mirror -------------------
+
+    async def upsert_in_flight_claims(
+        self, claims: Sequence[tuple[PositionKey, int, int, datetime]]
+    ) -> None:
+        """Upsert rows into `in_flight_claim` for the given claims.
+
+        ``claims`` is a sequence of ``(key, process_id, worker_id,
+        claimed_at)`` tuples -- the design's "diagnostic mirror" of the
+        per-process In_Flight_Set (design.md's In_Flight_Set section):
+        "once per Report_Interval it upserts into a logged
+        `in_flight_claim` table the claims that have been held longer than
+        one Report_Interval". Selecting *which* claims qualify (held
+        longer than one Report_Interval) and running that once-per-
+        Report_Interval loop is the Search_Coordinator's job (task 13);
+        this method is only the storage primitive it calls.
+        """
+        if not claims:
+            return
+
+        args = [
+            (fold_u64_to_i64(key.hi), fold_u64_to_i64(key.lo), process_id, worker_id, claimed_at)
+            for key, process_id, worker_id, claimed_at in claims
+        ]
+
+        async def _do_upsert(pool: asyncpg.Pool) -> None:
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.executemany(
+                        "INSERT INTO in_flight_claim (key_hi, key_lo, process_id, worker_id, "
+                        "claimed_at) VALUES ($1, $2, $3, $4, $5) "
+                        "ON CONFLICT (key_hi, key_lo) DO UPDATE SET "
+                        "process_id = EXCLUDED.process_id, worker_id = EXCLUDED.worker_id, "
+                        "claimed_at = EXCLUDED.claimed_at",
+                        args,
+                    )
+
+        await self._run(_do_upsert)
+
+    async def delete_in_flight_claims(self, keys: Sequence[PositionKey]) -> None:
+        """Delete `in_flight_claim` rows for claims that have been released.
+
+        The other half of the diagnostic mirror: once a claim is released
+        (the In_Flight_Set entry it mirrors is gone), its mirror row is no
+        longer meaningful and is deleted.
+        """
+        if not keys:
+            return
+
+        key_his = [fold_u64_to_i64(k.hi) for k in keys]
+        key_los = [fold_u64_to_i64(k.lo) for k in keys]
+
+        async def _do_delete(pool: asyncpg.Pool) -> None:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM in_flight_claim WHERE (key_hi, key_lo) IN "
+                    "(SELECT * FROM unnest($1::bigint[], $2::bigint[]))",
+                    key_his,
+                    key_los,
+                )
+
+        await self._run(_do_delete)
+
+    async def clear_in_flight_claims_at_startup(self) -> int:
+        """`SELECT count(*)` then `TRUNCATE in_flight_claim` (Requirement 10.2).
+
+        Reads no `book_node` row and touches no visit count or value sum:
+        the count and the truncate both target `in_flight_claim` alone.
+        Returns the pre-clear row count, which is what Requirement 10.2's
+        "report the number of cleared entries" needs.
+
+        This is deliberately *not* called from `connect_and_prepare` or
+        `ensure_schema`: Requirement 10.2's clearing is conceptually a
+        Search_Coordinator startup step (it is meaningful only in relation
+        to the in-process In_Flight_Set that a `search`-role run
+        maintains), not schema management, and a `propagate`/`export`-role
+        instance has no In_Flight_Set to reconcile against at all. A
+        caller on the search startup path (`__main__.py`, task 17.1) is
+        expected to call this explicitly, once, after `ensure_schema()`
+        and before the first Selection_Descent.
+        """
+
+        async def _do_clear(pool: asyncpg.Pool) -> int:
+            async with pool.acquire() as conn:
+                count = await conn.fetchval("SELECT count(*) FROM in_flight_claim")
+                await conn.execute("TRUNCATE in_flight_claim")
+                return count
+
+        return await self._run(_do_clear)
 
 
 __all__ = [
@@ -1078,4 +2022,10 @@ __all__ = [
     "BookNodeView",
     "GetResult",
     "Terminal",
+    "ExpansionWrite",
+    "WriteOutcome",
+    "WriteResult",
+    "BackupDelta",
+    "PropagationWrite",
+    "Stats",
 ]
