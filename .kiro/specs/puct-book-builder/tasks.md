@@ -117,13 +117,13 @@ example, not 100 short ones.
     - **Property 42: Credentials are redacted**
     - **Validates: Requirements 13.6**
 
-- [ ] 5. YaneuraOu `.db` parsing and printing
+- [x] 5. YaneuraOu `.db` parsing and printing
   - [ ]* 5.1 Write the independent `.db` reference implementation
     - `tests/book/reference/book_db.py`: a parser and printer written **from the Requirement 6 text alone**, importing nothing from `dlshogi.book`, reviewed against the requirements rather than against the implementation
     - Both sides are Python now, so independence is deliberate rather than a consequence of a language boundary; state that in the module docstring
     - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7_
 
-  - [ ] 5.2 Implement `dlshogi/book/book_db.py`
+  - [x] 5.2 Implement `dlshogi/book/book_db.py`
     - `TerashockMove`, `TerashockEntry`, `TerashockBook` dataclasses with moves stored as `move16` so the printer output is canonical
     - Book_DB_Parser as a line-oriented state machine with the classification order blank, `#YANEURAOU-DB2016 <version>`, other `#`, `sfen `, five-field candidate move, anything else; states *before any sfen line* and *inside an entry*
     - Book_DB_Printer emitting the header line, the `# NOE:<count>` line, `sfen ` lines, and five-field move lines with single-space separators and the literal `none` for an absent reply

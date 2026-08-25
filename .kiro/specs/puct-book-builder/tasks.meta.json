@@ -50,6 +50,13 @@
         "chatSessionId": "sess_2d0e5358-ebb4-422d-9aff-bbda13ec7216",
         "timestamp": 1787560559698
       }
+    ],
+    "5.2 Implement `dlshogi/book/book_db.py`": [
+      {
+        "executionId": "74b7f426-28c7-4a1e-b90f-f0e8eab823fc",
+        "chatSessionId": "sess_e55dbb3d-1c8d-4f8f-a279-447be2e44fa5",
+        "timestamp": 1787605506171
+      }
     ]
   }
 }
