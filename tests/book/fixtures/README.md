@@ -13,16 +13,16 @@ populates and consumes it.
 
 ## Present corpora
 
-- **`zobrist_fingerprint.txt`** (task 2.3, consumed by tasks 3.2/3.4's
-  `tests/book/test_keys.py`) -- the golden `zobrist_fingerprint()` value
-  recorded once against the extended `dlshogi.cppshogi` binding
-  (`5210274903348193363`). `test_keys.py` compares the running binding's
-  fingerprint against this file, so an accidental change to Zobrist table
-  initialization order is caught immediately rather than silently
-  re-keying every Position_Key already stored in a book database (see
-  Requirement 3.4 and design.md's *Position_Key from Python* section). A
-  future `tests/book/test_integration.py` binding build-and-import gate
-  test (task 2.3's own remaining scope) reuses the same file.
+- **`zobrist_fingerprint.txt`** (task 2.3, consumed by
+  `tests/book/test_integration.py`'s build-and-import gate test and by
+  tasks 3.2/3.4's `tests/book/test_keys.py`) -- the golden
+  `zobrist_fingerprint()` value recorded once against the extended
+  `dlshogi.cppshogi` binding (`5210274903348193363`). Both files compare
+  the running binding's fingerprint against this file, so an accidental
+  change to Zobrist table initialization order is caught immediately
+  rather than silently re-keying every Position_Key already stored in a
+  book database (see Requirement 3.4 and design.md's *Position_Key from
+  Python* section).
 
 - **`position_keys.json`** (task 2.3, consumed by tasks 3.2/3.3's
   `tests/book/test_keys.py`) -- golden `(name, sfen, key_hi, key_lo)`

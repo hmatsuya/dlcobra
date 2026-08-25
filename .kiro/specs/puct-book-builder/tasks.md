@@ -42,7 +42,7 @@ example, not 100 short ones.
     - `tests/book/fixtures/` directory with a README stating what each fixture corpus is for
     - _Requirements: 13.1_
 
-- [ ] 2. 128-bit Position_Key Cython binding (hard prerequisite)
+- [x] 2. 128-bit Position_Key Cython binding (hard prerequisite)
   - [x] 2.1 Add the four free functions to the C++ python module
     - In `cppshogi/python_module.h` declare `__position_key_from_sfen`, `__position_keys_after`, `__zobrist_fingerprint`, `__apery_book_key_from_sfen` in the style of the existing free functions
     - Implement them in `cppshogi/python_module.cpp` over `Position::getBoardKey()`, `Position::getHandKey()`, and `Position::getKeyAndBoardKeyAfter(Move)`; `__position_keys_after` sets a `Position` from the SFEN once then iterates the supplied `move16` array
@@ -55,12 +55,12 @@ example, not 100 short ones.
     - Wrappers take numpy buffers of the 16-byte key dtype and encode SFEN strings with `locale.getpreferredencoding()`, matching the existing pattern
     - _Requirements: 3.1, 3.7_
 
-  - [ ]* 2.3 Write the binding build-and-import gate test
+  - [x]* 2.3 Write the binding build-and-import gate test
     - `tests/book/test_integration.py`: build and import the extended `dlshogi.cppshogi`, assert the four new functions are importable, assert `zobrist_fingerprint()` equals the golden value recorded in `tests/book/fixtures/zobrist_fingerprint.txt`
     - Create the golden Position_Key vector fixture `tests/book/fixtures/position_keys.json` as (SFEN, key_hi, key_lo) triples covering the initial position, mid-game positions, drop and promotion positions, and positions differing only in the non-moving side's hand
     - This test is the gate that declares the prerequisite complete
     - _Requirements: 3.1, 3.4_
-    - Note: the golden fixtures (`tests/book/fixtures/zobrist_fingerprint.txt`, `tests/book/fixtures/position_keys.json`) were created and are consumed by `tests/book/test_keys.py` (task 3.2). The dedicated `tests/book/test_integration.py` build-and-import gate test itself remains unwritten.
+    - Note: the golden fixtures (`tests/book/fixtures/zobrist_fingerprint.txt`, `tests/book/fixtures/position_keys.json`) were created first and are also consumed by `tests/book/test_keys.py` (task 3.2). `tests/book/test_integration.py` itself is now written as a deliberately thin gate test: it asserts the four new functions are importable off the built `dlshogi.cppshogi` extension and that `zobrist_fingerprint()` matches the golden fixture, and its docstring records that the substance of Properties 8 and 10 lives in `test_keys.py`. Task 19.1 extends this same file with the scale integration test later. `pytest tests/book/test_integration.py -v` -> 2 passed; `pytest -m "not db"` -> 88 passed, 0 failed.
 
 - [x] 3. Position_Key module, packed edge codec, and shared strategies
   - [x] 3.1 Implement `dlshogi/book/keys.py`
@@ -154,7 +154,7 @@ example, not 100 short ones.
 - [x] 6. Checkpoint - pure modules green without a database or a GPU
   - Ensure all tests pass, ask the user if questions arise.
   - `pytest -m "not db"` covers Properties 8, 9, 10, 20, 21, 41, 42 and the packed-edge layout assertions at this point
-  - Result: `pytest -m "not db"` -> 76 passed, 0 failed, in ~24s. Fixed a real bug found while writing the packed-edge codec test (see task 3.6's note). The task 2.3 gate test itself (`tests/book/test_integration.py`) and the node-field/edge-array/graph/entry-list hypothesis strategies remain for their owning later tasks, per task 3.7's note.
+  - Result: `pytest -m "not db"` -> 76 passed, 0 failed, in ~24s. Fixed a real bug found while writing the packed-edge codec test (see task 3.6's note). The task 2.3 gate test itself (`tests/book/test_integration.py`) was unwritten at this checkpoint and landed later (see task 2.3's note); the node-field/edge-array/graph/entry-list hypothesis strategies remain for their owning later tasks, per task 3.7's note.
 
 - [x] 7. Schema management and Node_Store read path
   - [x] 7.1 Write `dlshogi/book/sql/schema.sql`
@@ -282,19 +282,21 @@ example, not 100 short ones.
     - **Validates: Requirements 11.8**
     - `db` marker; `@settings(deadline=None)`; parametrised over both the extension path and the client-side fallback, and deliberately bypassing the coalescing accumulator so that PostgreSQL's row lock is what is actually tested
 
-- [ ] 10. Evaluator
-  - [ ] 10.1 Implement the batching Evaluator against an injectable session
+- [x] 10. Evaluator
+  - [x] 10.1 Implement the batching Evaluator against an injectable session
     - `dlshogi/book/evaluator.py`: `EvalRequest` with an `asyncio.Future`, one collector coroutine per process over an `asyncio.Queue`, a preallocated staging buffer of `Batch_Size` entries filled by `cshogi.dlshogi.make_input_features`
     - Dispatch at `Batch_Size` or when `Batch_Timeout` has elapsed since the **earliest** pending request, with the earliest-arrival timestamp captured when the first request enters an empty buffer and `remaining` recomputed on each iteration
     - Policy decoding via `make_move_label` gathering legal-move logits out of the 2187-entry head, then a normalised softmax over exactly those entries; the degenerate policy-sum case substitutes `1/n` before the softmax and reports
     - Failure handling: an invocation error, a short result array, or a non-finite win rate or probability marks every request in the batch failed
     - The session is injected, so a stub returning drawn arrays satisfies the whole property suite with no GPU
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7_
+    - Note: implemented `Evaluator`/`EvalRequest`/`EvalResult`/`InferenceSession`/`EvaluatorBatchError` in `dlshogi/book/evaluator.py`. `InferenceSession` is a structural `Protocol` with a synchronous `run(f1, f2) -> (policy_logits, values)` method; the collector dispatches it via `loop.run_in_executor` so a blocking onnxruntime call (task 10.5) does not block the event loop. Verified manually against stub sessions: batch-size dispatch, Batch_Timeout dispatch measuring the earliest-pending-request deadline, all three Requirement 5.6 failure modes (raising session, short result array, non-finite win rate), and the Requirement 5.7 degenerate-policy-sum substitution (all-`-inf` logits -> uniform 1/n, `substitution_count` incremented, no `RuntimeWarning`). `pytest -m "not db" tests/book` still passes (80 passed, 0 failed) with no regressions.
 
-  - [ ] 10.5 Wire the real onnxruntime session
+  - [x] 10.5 Wire the real onnxruntime session
     - TensorRT execution provider first with `trt_fp16_enable` and `trt_engine_cache_enable`, CUDA provider as the fallback, driven through `io_binding` with `bind_cpu_input("input1"/"input2")` and `bind_output("output_policy"/"output_value")`, following `dlshogi/utils/usi_policy_only.py`
     - Log the resolved provider at startup; zero-pad a short final batch rather than triggering an engine rebuild, discarding the padded outputs
     - _Requirements: 5.1, 5.2, 15.7_
+    - Note: implemented `OnnxRuntimeInferenceSession` in `dlshogi/book/evaluator.py`, a concrete `InferenceSession` adapter constructed from a model path (plus `device_id`, `fixed_batch_size`, `trt_fp16_enable`, `trt_engine_cache_enable`, `trt_engine_cache_path`, `provider_options`, `session_options`) rather than from `BookConfig` directly: `BookConfig` (task 4.1) has no GPU-deployment fields (model path, device id, provider preferences) and none were added, since those are per-process `search` deployment choices (one process per GPU, per design.md) rather than Requirement 13's per-run configuration surface — adding them would have required a corresponding `RANGE_TABLE` row and rippled into Property 41's generator for no requirement this task cites. `ort.InferenceSession` is constructed with providers `[("TensorrtExecutionProvider", {device_id, trt_fp16_enable, trt_engine_cache_enable, trt_engine_cache_path}), ("CUDAExecutionProvider", {device_id}), "CPUExecutionProvider"]`; onnxruntime's own fallback silently skips an unavailable provider (verified empirically: on this GPU-less dev machine, requesting Tensorrt/CUDA warns and falls back to `CPUExecutionProvider` with no exception), and the resolved provider (`session.get_providers()[0]`) is logged at `INFO` via this module's existing `_LOG`. `run()` implements the zero-pad-then-slice-back behavior: when constructed with `fixed_batch_size` and called with fewer rows, it pads `features1`/`features2` up to `fixed_batch_size` with zeros, invokes `_run_iobinding` (the `bind_cpu_input`/`bind_output`/`run_with_iobinding`/`copy_outputs_to_cpu` sequence from `usi_policy_only.py`), and slices the two returned arrays back down to the caller's original row count before returning — so `Evaluator._dispatch`'s `session.run(f1, f2)` call (unchanged from task 10.1) always sees output shaped for exactly the `n` rows it passed in. Verified with `tests/book/test_evaluator.py` (6 tests, no GPU required): the padding/slicing logic in isolation via a monkeypatched `_run_iobinding` (no real session), and end-to-end against a real `onnxruntime.InferenceSession` loaded from a tiny synthetic `.onnx` model built with the exact `input1`/`input2`/`output_policy`/`output_value` names and dynamic batch axis `convert_model_to_onnx.py` produces (including a padded-batch run through that real session). Explicitly NOT verified without GPU hardware (stated in the test module's own docstring): the actual `TensorrtExecutionProvider`/`CUDAExecutionProvider` code paths (engine building, `trt_fp16_enable`, real GPU inference), and that padding actually avoids a TensorRT engine rebuild (there is no engine to rebuild on this machine) — only the input/output array shapes the padding logic produces are verified, which is the full externally-visible contract `Evaluator._dispatch` depends on. `pytest -m "not db" tests/book` passes at 86 passed, 0 failed (80 prior + 6 new), no regressions. No `config.py` changes were made, so Property 41's `RANGE_TABLE`-driven generator (`tests/book/test_config_properties.py`) needs no change.
 
   - [ ]* 10.2 Write property test for Evaluator outputs
     - **Property 17: Evaluator output is a normalised distribution and a win rate**
