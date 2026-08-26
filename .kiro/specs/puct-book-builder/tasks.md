@@ -442,13 +442,13 @@ example, not 100 short ones.
     - **Validates: Requirements 11.9**
     - `db` marker; termination kinds `cancel`, `raise`, and `timeout`, which are the three ways a descent task dies in this design
 
-- [ ] 14. Value_Propagator
+- [x] 14. Value_Propagator
   - [ ]* 14.1 Write the independent negamax reference implementation
     - `tests/book/reference/negamax.py`: the Child_Contribution precedence recurrence written **from the Requirement 9 text alone**, importing nothing from `dlshogi.book`, reviewed against the requirements rather than against `propagate.py`
     - A straightforward recursive function, which is why the graph strategy caps at 2000 nodes
     - _Requirements: 9.2, 9.3, 9.4, 9.5, 9.9, 9.10, 9.12, 9.13, 9.15_
 
-  - [ ] 14.2 Implement `dlshogi/book/propagate.py`
+  - [x] 14.2 Implement `dlshogi/book/propagate.py`
     - Forward walk from the Root_Position over an **explicit** frame `list`, never Python recursion, bounded by `max(Max_Book_Ply, 1)` frames and by a hard 1024-frame guard when `Max_Book_Ply` is 0, counting cutoffs
     - Per frame: `set_sfen`, `np.frombuffer` decode, one batched `position_keys_after(sfen, edges["move16"])` call, a numpy threshold partition, then `asyncio.gather` of `get_many` for above-threshold children and `get_many_terminal_eval` for below-threshold children
     - Requirement 9 criterion 15's precedence order implemented **literally and in order**: terminal child; child on the current path (`Draw_Value_*` by the child's side to move, stored nowhere); below-threshold edge (visit count >= 1 gives `1 - clip(value_sum / visit_count, 0, 1)` with the clamp applied before the subtraction, visit count 0 gives the child's `eval_win_rate` else `Draw_Value_*`, neither descended into nor stored); otherwise the child's own propagated value
