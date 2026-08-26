@@ -313,8 +313,8 @@ example, not 100 short ones.
     - **Validates: Requirements 5.6**
     - `db` marker, since the property asserts that no `book_node` row is created or changed
 
-- [ ] 11. Repetition_Resolver and terminal states
-  - [ ] 11.1 Implement `dlshogi/book/repetition.py`
+- [x] 11. Repetition_Resolver and terminal states
+  - [x] 11.1 Implement `dlshogi/book/repetition.py`
     - The resolver keeps **its own** `path_occurrences: dict[PositionKey, int]` keyed by the 128-bit Position_Key, incremented on push and decremented on pop, because cshogi's `is_draw()` was measured to return `REPETITION_DRAW` at the **second** occurrence and Requirement 8.1 needs the **fourth**
     - The resolver also keeps its own per-ply `board.is_check()` record, because cshogi exposes no `continuousCheck` equivalent; "checked at all four occurrences" is a scan of that record between the first and fourth occurrence indices
     - cshogi's `is_draw()` is consulted as a corroborating signal only, asserting agreement and reporting a discrepancy rather than driving the classification
