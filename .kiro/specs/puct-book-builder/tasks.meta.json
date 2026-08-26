@@ -276,6 +276,16 @@
         "executionId": "4021616e-a14e-4434-b1fc-d0516cfb8c80",
         "chatSessionId": "sess_30881d6d-b764-4473-9c83-ff19791bc892",
         "timestamp": 1787695233373
+      },
+      {
+        "executionId": "9b89e192-5d17-42c3-8e42-5a5f6617a4de",
+        "chatSessionId": "sess_8bcbf29d-d3ca-425d-a958-5f9b8ba65fe5",
+        "timestamp": 1787782029013
+      },
+      {
+        "executionId": "9b89e192-5d17-42c3-8e42-5a5f6617a4de",
+        "chatSessionId": "sess_8bcbf29d-d3ca-425d-a958-5f9b8ba65fe5",
+        "timestamp": 1787782548506
       }
     ],
     "12.3 Implement `dlshogi/book/terashock.py`": [
@@ -288,6 +298,16 @@
         "executionId": "4021616e-a14e-4434-b1fc-d0516cfb8c80",
         "chatSessionId": "sess_30881d6d-b764-4473-9c83-ff19791bc892",
         "timestamp": 1787695234559
+      },
+      {
+        "executionId": "9b89e192-5d17-42c3-8e42-5a5f6617a4de",
+        "chatSessionId": "sess_8bcbf29d-d3ca-425d-a958-5f9b8ba65fe5",
+        "timestamp": 1787782030287
+      },
+      {
+        "executionId": "9b89e192-5d17-42c3-8e42-5a5f6617a4de",
+        "chatSessionId": "sess_8bcbf29d-d3ca-425d-a958-5f9b8ba65fe5",
+        "timestamp": 1787782549162
       }
     ],
     "13.1 Implement the In_Flight_Set and the claim reaper": [
@@ -453,6 +473,13 @@
         "executionId": "22612f2b-f0e0-4986-b633-d6708f50dee2",
         "chatSessionId": "sess_b6295688-01ad-4ec5-a046-026ae08a6c0e",
         "timestamp": 1787781480237
+      }
+    ],
+    "12. Prior_Mixer and Terashock_Index": [
+      {
+        "executionId": "9b89e192-5d17-42c3-8e42-5a5f6617a4de",
+        "chatSessionId": "sess_8bcbf29d-d3ca-425d-a958-5f9b8ba65fe5",
+        "timestamp": 1787782549536
       }
     ]
   }

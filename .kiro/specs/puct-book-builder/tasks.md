@@ -337,8 +337,8 @@ example, not 100 short ones.
     - `tests/book/test_repetition.py` example tests over real perpetual-check positions in `tests/book/fixtures/`, backing Property 23's truth table with positions random generation does not reliably produce
     - _Requirements: 8.3, 8.4_
 
-- [ ] 12. Prior_Mixer and Terashock_Index
-  - [ ] 12.1 Implement `dlshogi/book/prior_mixer.py`
+- [x] 12. Prior_Mixer and Terashock_Index
+  - [x] 12.1 Implement `dlshogi/book/prior_mixer.py`
     - `t_raw(e) = exp(win_rate(e.ts_eval) / tau)` for edges carrying a Terashock evaluation and 0 otherwise, normalised to `t`, then `prior = (1 - w) * policy + w * t`
     - `win_rate(score) = 1 / (1 + exp(-score / Eval_Coef))`, the inverse of the `-log(1/wp - 1) * eval_coef` conversion used by `usi/UctSearch.cpp` and `make_book_minmax.py`
     - Illegal Terashock_Moves are dropped before `t_raw` is formed, so they influence neither the weights nor the edge set
@@ -346,7 +346,7 @@ example, not 100 short ones.
     - Mixing in float64, quantised to `prior_q16` on write
     - _Requirements: 7.3, 7.4, 7.5, 7.7, 7.9, 7.10_
 
-  - [ ] 12.3 Implement `dlshogi/book/terashock.py`
+  - [x] 12.3 Implement `dlshogi/book/terashock.py`
     - `import-terashock`: parse with Book_DB_Parser, `copy_records_to_table` into an unlogged staging table, then one `INSERT ... SELECT ... ON CONFLICT (key_hi, key_lo) DO UPDATE` so the **last** parsed entry wins and the conflict count is the duplicate-SFEN count
     - `moves` stored as `PACKED_TS_MOVE` records
     - Terashock_Index lookup by Position_Key with a small in-process LRU inside Cache_Budget; source identity (path, size, mtime, entry count, parser version) recorded in `book_meta` and compared at startup, triggering the import on mismatch or absence before any command is accepted
