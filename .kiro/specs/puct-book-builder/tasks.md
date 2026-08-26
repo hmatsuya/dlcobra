@@ -358,14 +358,14 @@ example, not 100 short ones.
     - **Validates: Requirements 7.3, 7.5, 7.7, 7.9, 7.10**
     - `@settings(max_examples=1000)`; the tolerance assertions are made against the `prior_q16`-decoded values so the quantisation error budget is part of the property
 
-- [ ] 13. Search_Coordinator
-  - [ ] 13.1 Implement the In_Flight_Set and the claim reaper
+- [x] 13. Search_Coordinator
+  - [x] 13.1 Implement the In_Flight_Set and the claim reaper
     - `dlshogi/book/search.py`: `InFlightSet` backed by a plain `dict[PositionKey, Claim]` carrying worker id and claim timestamp, with no lock, because a single-threaded event loop cannot preempt between the test and the add
     - **Code invariant, not a language guarantee:** `test_and_add` is a plain `def`, contains no `await`, no `asyncio.sleep`, and no coroutine call between the membership test and the insertion. Record the invariant as a module docstring note; Property 31 is its executable statement
     - `discard`, the 1000 ms release contract, and the 300 s reaper coroutine waking once per second
     - _Requirements: 11.2, 11.3, 11.7_
 
-  - [ ] 13.3 Implement PUCT selection
+  - [x] 13.3 Implement PUCT selection
     - Vectorized scoring over the decoded edge array: `q = where(n_eff > 0, w / max(n_eff, 1), q0)`, `score = q + c_puct * p * sqrt(n_par) / (1 + n_eff)`, with `n_eff = n + virtual_loss * in_flight_mask` and `w` left unchanged because virtual loss adds no wins
     - `w` needs no perspective flip, because a Book_Edge's accumulated value sum is stored from the parent Book_Node's side-to-move perspective
     - `q0` is 0.5 for an edge with no Terashock evaluation and the Terashock-derived win rate otherwise, computed as a vector over the `flags` bit-0 mask
@@ -373,7 +373,7 @@ example, not 100 short ones.
     - Excluded edges get `-inf`; virtual-loss terms are scoring-time only and are never written
     - _Requirements: 4.2, 4.7, 11.4_
 
-  - [ ] 13.6 Implement the descent task
+  - [x] 13.6 Implement the descent task
     - Termination rules in order: `Max_Book_Ply` depth reached, terminal state, no edges (expand, and the newly expanded node is this descent's leaf), otherwise select an edge with in-flight children excluded for the rest of the descent; all edges excluded means abandon with no write, report, and start the next descent within 100 ms
     - None of the four rules reads the side to move, which is what makes colour-independence a property of the search rather than a carve-out
     - Root node creation when absent, at visit count 0 and value sum 0, before the first descent
@@ -382,7 +382,7 @@ example, not 100 short ones.
     - Value backup through the coalescing accumulator with the per-node and per-edge perspective conversion
     - _Requirements: 4.1, 4.3, 4.4, 4.6, 4.7, 4.8, 4.9, 4.11, 4.12, 5.6, 8.11, 11.4, 11.7, 15.6_
 
-  - [ ] 13.12 Implement the supervisor, resume, and shutdown
+  - [x] 13.12 Implement the supervisor, resume, and shutdown
     - `TaskGroup`-style supervisor keeping exactly `Worker_Count` descent tasks alive with no bound on the number of descents, the wall-clock duration, or the Evaluator invocations per node; each completed task is replaced
     - Resume: a node with at least one Book_Edge or a non-empty terminal state counts as already evaluated and the Evaluator is not invoked for it; root-mismatch detection at startup
     - Stop: SIGINT / SIGTERM via `loop.add_signal_handler` plus the `stop` command sets a flag that starts no further descent and enqueues no further evaluation, lets in-flight descents finish, flushes the accumulator, and exits within 60 s; at the deadline the remaining tasks are cancelled, incomplete expansion writes discarded, and a forced-shutdown indication reported
