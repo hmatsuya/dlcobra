@@ -430,6 +430,16 @@
         "executionId": "4021616e-a14e-4434-b1fc-d0516cfb8c80",
         "chatSessionId": "sess_30881d6d-b764-4473-9c83-ff19791bc892",
         "timestamp": 1787695241301
+      },
+      {
+        "executionId": "7a350418-a61c-43fe-903d-399562189b51",
+        "chatSessionId": "sess_c82a3976-f23f-433a-93d2-4a8b65078276",
+        "timestamp": 1787786262965
+      },
+      {
+        "executionId": "7a350418-a61c-43fe-903d-399562189b51",
+        "chatSessionId": "sess_c82a3976-f23f-433a-93d2-4a8b65078276",
+        "timestamp": 1787787180974
       }
     ],
     "15.4 Implement the external sort and the Apery writer": [
@@ -442,6 +452,16 @@
         "executionId": "4021616e-a14e-4434-b1fc-d0516cfb8c80",
         "chatSessionId": "sess_30881d6d-b764-4473-9c83-ff19791bc892",
         "timestamp": 1787695241778
+      },
+      {
+        "executionId": "7a350418-a61c-43fe-903d-399562189b51",
+        "chatSessionId": "sess_c82a3976-f23f-433a-93d2-4a8b65078276",
+        "timestamp": 1787786268510
+      },
+      {
+        "executionId": "7a350418-a61c-43fe-903d-399562189b51",
+        "chatSessionId": "sess_c82a3976-f23f-433a-93d2-4a8b65078276",
+        "timestamp": 1787787188123
       }
     ],
     "15.6 Implement the YaneuraOu `.db` export path": [
@@ -454,6 +474,16 @@
         "executionId": "4021616e-a14e-4434-b1fc-d0516cfb8c80",
         "chatSessionId": "sess_30881d6d-b764-4473-9c83-ff19791bc892",
         "timestamp": 1787695242197
+      },
+      {
+        "executionId": "7a350418-a61c-43fe-903d-399562189b51",
+        "chatSessionId": "sess_c82a3976-f23f-433a-93d2-4a8b65078276",
+        "timestamp": 1787786277767
+      },
+      {
+        "executionId": "7a350418-a61c-43fe-903d-399562189b51",
+        "chatSessionId": "sess_c82a3976-f23f-433a-93d2-4a8b65078276",
+        "timestamp": 1787787194258
       }
     ],
     "16.1 Implement `dlshogi/book/report.py`": [
@@ -466,6 +496,16 @@
         "executionId": "4021616e-a14e-4434-b1fc-d0516cfb8c80",
         "chatSessionId": "sess_30881d6d-b764-4473-9c83-ff19791bc892",
         "timestamp": 1787695242676
+      },
+      {
+        "executionId": "c4cb635e-c59b-4e93-a499-88bc79e04ec6",
+        "chatSessionId": "sess_036837b8-58b7-416b-9f06-e5aac262ebea",
+        "timestamp": 1787787298652
+      },
+      {
+        "executionId": "c4cb635e-c59b-4e93-a499-88bc79e04ec6",
+        "chatSessionId": "sess_036837b8-58b7-416b-9f06-e5aac262ebea",
+        "timestamp": 1787787957389
       }
     ],
     "17.1 Wire `dlshogi/book/__main__.py` and the startup flow": [
@@ -478,6 +518,16 @@
         "executionId": "4021616e-a14e-4434-b1fc-d0516cfb8c80",
         "chatSessionId": "sess_30881d6d-b764-4473-9c83-ff19791bc892",
         "timestamp": 1787695243634
+      },
+      {
+        "executionId": "96f5c6f3-ac5c-4f87-9aad-7e8f7099fda4",
+        "chatSessionId": "sess_f7de25b3-b819-44f9-8a85-78abfb0741f0",
+        "timestamp": 1787788026914
+      },
+      {
+        "executionId": "96f5c6f3-ac5c-4f87-9aad-7e8f7099fda4",
+        "chatSessionId": "sess_f7de25b3-b819-44f9-8a85-78abfb0741f0",
+        "timestamp": 1787788554100
       }
     ],
     "18. Checkpoint - full property suite green": [
@@ -544,6 +594,27 @@
         "executionId": "629b579f-0b11-46a4-801f-59c401f808e3",
         "chatSessionId": "sess_55345b1c-2634-405a-961f-17c12c272b35",
         "timestamp": 1787785889427
+      }
+    ],
+    "15. Book_Exporter": [
+      {
+        "executionId": "7a350418-a61c-43fe-903d-399562189b51",
+        "chatSessionId": "sess_c82a3976-f23f-433a-93d2-4a8b65078276",
+        "timestamp": 1787787195328
+      }
+    ],
+    "16. Progress_Reporter": [
+      {
+        "executionId": "c4cb635e-c59b-4e93-a499-88bc79e04ec6",
+        "chatSessionId": "sess_036837b8-58b7-416b-9f06-e5aac262ebea",
+        "timestamp": 1787787959039
+      }
+    ],
+    "17. CLI wiring, startup flow, and example tests": [
+      {
+        "executionId": "96f5c6f3-ac5c-4f87-9aad-7e8f7099fda4",
+        "chatSessionId": "sess_f7de25b3-b819-44f9-8a85-78abfb0741f0",
+        "timestamp": 1787788555219
       }
     ]
   }

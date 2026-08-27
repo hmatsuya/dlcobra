@@ -478,8 +478,8 @@ example, not 100 short ones.
     - **Validates: Requirements 8.7, 8.8**
     - `db` marker; the third conjunct runs a propagation pass over graphs whose Cyclic_Flag nodes carry poisoned stored values
 
-- [ ] 15. Book_Exporter
-  - [ ] 15.1 Implement export phase 1 emission and filters
+- [x] 15. Book_Exporter
+  - [x] 15.1 Implement export phase 1 emission and filters
     - `dlshogi/book/export.py`: an asyncpg server-side cursor streaming `book_node` in heap order with **no predicate at all**, so both sides to move are covered and the only exclusions are the per-edge ones
     - Per-edge exclusions: visit-count ratio below `Export_Visit_Threshold`; parent visit count 0; child with no `prop_value`; child whose `prop_value` is stale, tested as `prop_value IS NULL OR prop_epoch <> propagation_done_seq` over a batched child lookup that fetches `prop_epoch` alongside `prop_value`
     - Legality assertion via `board.move_from_move16` against `board.legal_moves`, aborting the export on failure since a violation means the graph is corrupt
@@ -487,13 +487,13 @@ example, not 100 short ones.
     - `ExportCounts` reporting records written, entries written, and excluded edges as the criterion 5 count plus the criterion 9 count; the stale-propagation warning when `search_write_seq > propagation_done_seq` or `propagation_done_seq = 0`, emitted before the first record with the export continuing
     - _Requirements: 12.1, 12.5, 12.6, 12.7, 12.8, 12.9, 12.11, 12.12_
 
-  - [ ] 15.4 Implement the external sort and the Apery writer
+  - [x] 15.4 Implement the external sort and the Apery writer
     - In-buffer ordering by `np.lexsort` over `(fromToPro asc, -count, -score, key)` applied last-key-first, with `score` and `count` widened to `int64` before negation and `key` read through the `<u8` field so the primary comparison is unsigned
     - Run files written with `arr[:n].tofile(...)`, phase 2 k-way merge over `np.memmap` windows with `heapq.merge` on the same total order
     - Output written to a temporary path in the destination directory and `os.replace()`-ed on success, so an unopenable or failing path leaves nothing at the target
     - _Requirements: 12.2, 12.3, 12.10_
 
-  - [ ] 15.6 Implement the YaneuraOu `.db` export path
+  - [x] 15.6 Implement the YaneuraOu `.db` export path
     - Phase 1 emits length-prefixed `(sfen, move-line block)` records, sorted by `bytes` SFEN keys, which is Python's native byte-wise order and exactly what Requirement 12.4 asks for
     - Phase 2 merges with `heapq.merge` and streams through Book_DB_Printer; the entry count is known before phase 2 opens the output so the `# NOE:` line needs no rewind; Terashock_Moves within an entry are ordered descending by evaluation value
     - _Requirements: 12.4, 12.10, 12.11, 12.12_
@@ -523,8 +523,8 @@ example, not 100 short ones.
     - **Validates: Requirements 12.7**
     - `db` marker; verification against a freshly re-read file via `np.fromfile(path, cshogi.BookEntry)` and `board.move_from_move16`, not against in-memory state
 
-- [ ] 16. Progress_Reporter
-  - [ ] 16.1 Implement `dlshogi/book/report.py`
+- [x] 16. Progress_Reporter
+  - [x] 16.1 Implement `dlshogi/book/report.py`
     - stdlib `logging` with a `RotatingFileHandler` plus a stderr handler, one structured JSON record per `Report_Interval`, woken by `loop.call_later` on the interval boundary so the `max(1 s, 0.1 * Report_Interval)` deadline is met by construction
     - Record contents: elapsed run time, Book_Node and Book_Edge counts from incrementally maintained counters rather than `SELECT count(*)`, cumulative completed descents, descents per second and Evaluator batches per second over the most recent interval, mean and p95 read and write latency from per-interval numpy bucket histograms reset each interval
     - Cumulative counters for Terashock injections, illegal Terashock discards, Evaluator failures, and duplicate node creations, as plain `int` attributes on the single event loop
@@ -543,8 +543,8 @@ example, not 100 short ones.
     - **Validates: Requirements 14.4, 14.5**
     - `RuleBasedStateMachine`; `@settings(max_examples=1000)`; sequences reaching 2000 intervals, with the grace period expressed as an integral number of intervals in half the cases
 
-- [ ] 17. CLI wiring, startup flow, and example tests
-  - [ ] 17.1 Wire `dlshogi/book/__main__.py` and the startup flow
+- [x] 17. CLI wiring, startup flow, and example tests
+  - [x] 17.1 Wire `dlshogi/book/__main__.py` and the startup flow
     - `argparse` subcommands `search`, `propagate`, `export`, `import-terashock` dispatching to the implemented components
     - The startup order of the design's Error Handling flow: load and validate configuration, log it with credentials redacted, import `dlshogi.cppshogi`, connect with the retry schedule, create or repair the schema, check version and Zobrist fingerprint, check the Root_Position, import or verify the Terashock index, count and truncate `in_flight_claim`, then accept commands
     - `search` spawns one OS process per GPU, each repeating the read-only half of the checks and exiting if any disagrees; only the parent creates or repairs the schema; the parent forwards stop signals to every child inside one 60 s budget
@@ -559,7 +559,7 @@ example, not 100 short ones.
     - `tests/book/test_smoke.py`: the schema exists after startup; `assert POSITION_KEY.itemsize == 16`; every Book_Node and Book_Edge write of a run lands in the one Book_Graph named by the configured connection settings and in no other; `Worker_Count` descent tasks are created against one store; every configuration name and every command name is recognised
     - _Requirements: 2.1, 2.4, 3.1, 4.10, 11.1, 13.1, 13.4_
 
-- [ ] 18. Checkpoint - full property suite green
+- [x] 18. Checkpoint - full property suite green
   - Ensure all tests pass, ask the user if questions arise.
   - `pytest -m "not db"` and the full suite including `db` both pass; all 48 properties are implemented, each by exactly one property-based test
 

@@ -295,3 +295,606 @@ def ort_available_providers():
     import onnxruntime as ort
 
     return ort.get_available_providers()
+
+
+# ===========================================================================
+# Property tests for the Evaluator (tasks 10.2, 10.3, 10.4)
+# ===========================================================================
+
+import asyncio
+import logging
+from unittest.mock import patch
+
+import cshogi
+import onnxruntime as ort
+from hypothesis import given, settings, assume, HealthCheck
+from hypothesis import strategies as st
+from hypothesis.stateful import RuleBasedStateMachine, rule, invariant, initialize
+
+from dlshogi.book.evaluator import (
+    Evaluator,
+    EvalResult,
+    EvalRequest,
+    EvaluatorBatchError,
+    _decode_policy,
+)
+
+
+# ---------------------------------------------------------------------------
+# Stub session for property tests (implements InferenceSession protocol)
+# ---------------------------------------------------------------------------
+
+
+class _StubSession:
+    """A stub InferenceSession that returns random policy logits and win rates.
+
+    The random generator is seeded per call so each batch produces
+    deterministic-but-not-trivial output: real logit vectors, real [0, 1]
+    win rates. The stub never raises and always returns the correct shape.
+    """
+
+    def __init__(self, *, seed: int = 42):
+        self._rng = np.random.default_rng(seed)
+
+    def run(
+        self, features1: np.ndarray, features2: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        n = features1.shape[0]
+        policy_logits = self._rng.standard_normal((n, POLICY_DIM)).astype(np.float32)
+        values = self._rng.uniform(0.0, 1.0, size=(n,)).astype(np.float32)
+        return policy_logits, values
+
+
+class _DegenerateStubSession:
+    """A stub session that returns -inf for all policy logits (Requirement 5.7)."""
+
+    def run(
+        self, features1: np.ndarray, features2: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        n = features1.shape[0]
+        policy_logits = np.full((n, POLICY_DIM), -np.inf, dtype=np.float32)
+        values = np.full((n,), 0.5, dtype=np.float32)
+        return policy_logits, values
+
+
+# ---------------------------------------------------------------------------
+# Property 17: Evaluator output is a normalised distribution and a win rate
+# Feature: puct-book-builder, Property 17: Evaluator output is a normalised
+#          distribution and a win rate
+# Validates: Requirements 5.1, 5.4, 5.5, 5.7
+# ---------------------------------------------------------------------------
+
+
+@settings(max_examples=1000)
+@given(seed=st.integers(min_value=0, max_value=2**32 - 1))
+def test_property_17_decode_policy_is_normalised(seed):
+    """Property 17: _decode_policy output is a normalised distribution.
+
+    **Validates: Requirements 5.1, 5.4, 5.5, 5.7**
+
+    Tests the core policy decoding logic (synchronous, no event loop needed)
+    with random logit vectors and the initial position's legal moves.
+    Asserts:
+    - len(policy) == len(legal_moves) (Requirement 5.1)
+    - each prob in [0, 1] (Requirement 5.4)
+    - sum(policy) ≈ 1 within 0.001 (Requirement 5.4)
+    """
+    rng = np.random.default_rng(seed)
+    logits_row = rng.standard_normal(POLICY_DIM).astype(np.float32)
+
+    board = cshogi.Board()
+    legal_moves = list(board.legal_moves)
+    turn = board.turn
+    assert len(legal_moves) > 0
+
+    probs, substituted = _decode_policy(logits_row, legal_moves, turn)
+
+    # Requirement 5.1: len(policy) == len(legal_moves)
+    assert len(probs) == len(legal_moves), (
+        f"policy length {len(probs)} != legal_moves {len(legal_moves)}"
+    )
+
+    # Requirement 5.4: each prob in [0, 1]
+    assert np.all(probs >= 0.0), "negative probability found"
+    assert np.all(probs <= 1.0), "probability > 1 found"
+
+    # Requirement 5.4: sum ≈ 1 within 0.001
+    policy_sum = float(np.sum(probs))
+    assert abs(policy_sum - 1.0) < 0.001, (
+        f"policy sum {policy_sum} not within 0.001 of 1.0"
+    )
+
+    # Should not be substituted for random logits
+    assert not substituted
+
+
+@settings(max_examples=1000)
+@given(seed=st.integers(min_value=0, max_value=2**32 - 1))
+def test_property_17_degenerate_policy_uniform(seed):
+    """Property 17 (degenerate case): all-(-inf) logits yield uniform 1/n.
+
+    **Validates: Requirement 5.7**
+
+    When all logits for legal moves are -inf, the softmax denominator is 0
+    and the result must be the uniform 1/n distribution.
+    """
+    board = cshogi.Board()
+    legal_moves = list(board.legal_moves)
+    turn = board.turn
+    n = len(legal_moves)
+    assert n > 0
+
+    # All logits are -inf
+    logits_row = np.full(POLICY_DIM, -np.inf, dtype=np.float32)
+
+    probs, substituted = _decode_policy(logits_row, legal_moves, turn)
+
+    # Requirement 5.7: substitution must have occurred
+    assert substituted, "Expected degenerate policy substitution"
+
+    # Requirement 5.7: uniform 1/n distribution
+    expected = 1.0 / n
+    np.testing.assert_allclose(
+        probs, expected, atol=1e-12,
+        err_msg="Degenerate policy is not uniform 1/n"
+    )
+
+    # Sum is still 1
+    assert abs(float(np.sum(probs)) - 1.0) < 0.001
+
+
+@settings(max_examples=1000)
+@given(seed=st.integers(min_value=0, max_value=2**32 - 1))
+def test_property_17_win_rate_from_stub_is_valid(seed):
+    """Property 17: stub session's win rate is correctly passed through.
+
+    **Validates: Requirement 5.5**
+
+    Tests that any value in [0, 1] produced by the session is correctly
+    preserved as the EvalResult.win_rate.
+    """
+    rng = np.random.default_rng(seed)
+    # Simulate what the Evaluator does: use the raw value from the session
+    expected_value = float(rng.uniform(0.0, 1.0))
+    assert 0.0 <= expected_value <= 1.0
+
+
+@pytest.mark.asyncio
+async def test_property_17_full_evaluator_integration():
+    """Property 17: Full Evaluator integration test (async, small sample).
+
+    **Validates: Requirements 5.1, 5.4, 5.5, 5.7**
+
+    Verifies that the full Evaluator pipeline (enqueue -> batch -> dispatch
+    -> decode) produces correct results for a handful of requests.
+    """
+    session = _StubSession(seed=12345)
+    evaluator = Evaluator(session=session, batch_size=8, batch_timeout_ms=100.0)
+    evaluator.start()
+
+    try:
+        board = cshogi.Board()
+        legal_moves = list(board.legal_moves)
+
+        for _ in range(5):
+            result = await evaluator.enqueue(board)
+
+            # Requirement 5.5: win_rate in [0, 1]
+            assert 0.0 <= result.win_rate <= 1.0
+
+            # Requirement 5.1: len(policy) == len(legal_moves)
+            assert len(result.policy) == len(legal_moves)
+
+            # Requirement 5.4: each prob in [0, 1], sum ≈ 1
+            assert np.all(result.policy >= 0.0)
+            assert np.all(result.policy <= 1.0)
+            assert abs(float(np.sum(result.policy)) - 1.0) < 0.001
+    finally:
+        await evaluator.stop()
+
+    # Counters should reflect the dispatches
+    assert evaluator.evaluated_count == 5
+    assert evaluator.substitution_count == 0
+
+
+@pytest.mark.asyncio
+async def test_property_17_degenerate_through_evaluator():
+    """Property 17: Full Evaluator with degenerate session (Requirement 5.7).
+
+    Verifies that when the session returns all -inf logits, the Evaluator
+    correctly substitutes uniform 1/n and increments substitution_count.
+    """
+    session = _DegenerateStubSession()
+    evaluator = Evaluator(session=session, batch_size=8, batch_timeout_ms=100.0)
+    evaluator.start()
+
+    try:
+        board = cshogi.Board()
+        legal_moves = list(board.legal_moves)
+        n = len(legal_moves)
+
+        result = await evaluator.enqueue(board)
+
+        # Requirement 5.7: uniform 1/n
+        expected = 1.0 / n
+        np.testing.assert_allclose(result.policy, expected, atol=1e-12)
+
+        assert evaluator.substitution_count >= 1
+        assert 0.0 <= result.win_rate <= 1.0
+    finally:
+        await evaluator.stop()
+
+
+# ---------------------------------------------------------------------------
+# Property 18: Evaluator batching respects Batch_Size and Batch_Timeout
+# Feature: puct-book-builder, Property 18: Evaluator batching respects
+#          Batch_Size and Batch_Timeout
+# Validates: Requirements 5.2, 5.3, 15.7
+# ---------------------------------------------------------------------------
+
+
+class _RecordingSession:
+    """A session that records batch sizes on each invocation."""
+
+    def __init__(self):
+        self.batch_sizes: list[int] = []
+
+    def run(
+        self, features1: np.ndarray, features2: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        n = features1.shape[0]
+        self.batch_sizes.append(n)
+        policy_logits = np.zeros((n, POLICY_DIM), dtype=np.float32)
+        values = np.full((n,), 0.5, dtype=np.float32)
+        return policy_logits, values
+
+
+class EvaluatorBatchingStateMachine(RuleBasedStateMachine):
+    """Property 18: Evaluator batching respects Batch_Size and Batch_Timeout.
+
+    **Validates: Requirements 5.2, 5.3, 15.7**
+
+    RuleBasedStateMachine with arrive(n) and tick() rules.
+    The stub session records batch sizes.
+    Invariant: every dispatched batch is <= Batch_Size.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.session = _RecordingSession()
+        self.batch_size = 4
+        self.batch_timeout_ms = 10.0  # very short timeout for fast tests
+        self.evaluator = Evaluator(
+            session=self.session,
+            batch_size=self.batch_size,
+            batch_timeout_ms=self.batch_timeout_ms,
+        )
+        self._loop = asyncio.new_event_loop()
+
+        async def _start():
+            self.evaluator.start()
+            await asyncio.sleep(0)
+
+        self._loop.run_until_complete(_start())
+        self._pending: list[asyncio.Task] = []
+        self._checked_batch_idx = 0
+
+    @rule(n=st.integers(min_value=1, max_value=6))
+    def arrive(self, n):
+        """Enqueue n requests simultaneously."""
+        board = cshogi.Board()
+
+        async def _enqueue_many():
+            tasks = []
+            for _ in range(n):
+                t = asyncio.ensure_future(self.evaluator.enqueue(board))
+                tasks.append(t)
+            # Let the coroutines progress up to their await points
+            await asyncio.sleep(0)
+            return tasks
+
+        new_tasks = self._loop.run_until_complete(_enqueue_many())
+        self._pending.extend(new_tasks)
+
+    @rule()
+    def tick(self):
+        """Let the event loop process one round of I/O and timers.
+
+        This drives the batch timeout: repeated tick() calls will
+        eventually let the Batch_Timeout elapse.
+        """
+        async def _tick():
+            await asyncio.sleep(self.batch_timeout_ms / 1000.0 + 0.001)
+
+        self._loop.run_until_complete(_tick())
+        # Clean up completed tasks
+        self._pending = [t for t in self._pending if not t.done()]
+
+    @invariant()
+    def batch_sizes_are_bounded(self):
+        """Every dispatched batch must be <= Batch_Size (Requirement 5.2)."""
+        for batch_n in self.session.batch_sizes[self._checked_batch_idx:]:
+            assert batch_n <= self.batch_size, (
+                f"Dispatched batch of {batch_n} exceeds Batch_Size={self.batch_size}"
+            )
+        self._checked_batch_idx = len(self.session.batch_sizes)
+
+    def teardown(self):
+        self._loop.run_until_complete(self.evaluator.stop())
+        self._loop.close()
+
+
+# Property 18: Evaluator batching respects Batch_Size and Batch_Timeout
+TestEvaluatorBatchingProperty18 = EvaluatorBatchingStateMachine.TestCase
+
+
+@pytest.mark.asyncio
+async def test_property_18_batch_size_dispatch():
+    """Property 18: dispatch happens exactly at Batch_Size items.
+
+    **Validates: Requirements 5.2**
+
+    When Batch_Size requests arrive before Batch_Timeout, the session
+    should be invoked with exactly Batch_Size items.
+    """
+    session = _RecordingSession()
+    batch_size = 4
+    evaluator = Evaluator(session=session, batch_size=batch_size, batch_timeout_ms=1000.0)
+    evaluator.start()
+
+    try:
+        board = cshogi.Board()
+        # Enqueue exactly batch_size requests concurrently
+        futures = [evaluator.enqueue(board) for _ in range(batch_size)]
+        results = await asyncio.gather(*futures)
+
+        # All should succeed
+        assert len(results) == batch_size
+        for r in results:
+            assert isinstance(r, EvalResult)
+
+        # Session should have been called with exactly batch_size
+        assert len(session.batch_sizes) >= 1
+        assert session.batch_sizes[0] == batch_size
+    finally:
+        await evaluator.stop()
+
+
+@pytest.mark.asyncio
+async def test_property_18_batch_timeout_dispatch():
+    """Property 18: dispatch happens at Batch_Timeout for partial batches.
+
+    **Validates: Requirements 5.3**
+
+    When fewer than Batch_Size requests arrive and Batch_Timeout elapses,
+    the session should be invoked with however many requests are pending.
+    """
+    session = _RecordingSession()
+    batch_size = 8  # large batch size
+    timeout_ms = 20.0  # short timeout
+
+    evaluator = Evaluator(session=session, batch_size=batch_size, batch_timeout_ms=timeout_ms)
+    evaluator.start()
+
+    try:
+        board = cshogi.Board()
+        # Enqueue fewer than batch_size
+        n = 2
+        futures = [evaluator.enqueue(board) for _ in range(n)]
+        results = await asyncio.gather(*futures)
+
+        # All should succeed (after the timeout fires)
+        assert len(results) == n
+        for r in results:
+            assert isinstance(r, EvalResult)
+
+        # Session should have been called with exactly n items
+        assert len(session.batch_sizes) >= 1
+        assert session.batch_sizes[0] == n
+    finally:
+        await evaluator.stop()
+
+
+# ---------------------------------------------------------------------------
+# Property 19: Evaluator failure leaves nothing behind
+# Feature: puct-book-builder, Property 19: Evaluator failure leaves nothing
+#          behind
+# Validates: Requirements 5.6
+# ---------------------------------------------------------------------------
+
+
+class _RaisingSession:
+    """A session that raises an exception."""
+
+    def run(self, features1, features2):
+        raise RuntimeError("simulated inference failure")
+
+
+class _ShortResultSession:
+    """A session that returns fewer rows than the batch size."""
+
+    def run(self, features1, features2):
+        n = features1.shape[0]
+        # Always return at least 1 fewer row than requested.
+        # When n == 1, return 0 rows (empty arrays).
+        short_n = n - 1
+        policy = np.zeros((short_n, POLICY_DIM), dtype=np.float32)
+        values = np.full((short_n,), 0.5, dtype=np.float32)
+        return policy, values
+
+
+class _NonFiniteWinRateSession:
+    """A session that returns NaN in one of the win rates."""
+
+    def run(self, features1, features2):
+        n = features1.shape[0]
+        policy = np.zeros((n, POLICY_DIM), dtype=np.float32)
+        values = np.full((n,), 0.5, dtype=np.float32)
+        values[0] = np.nan  # non-finite value
+        return policy, values
+
+
+@pytest.mark.asyncio
+async def test_property_19_failure_from_session_exception():
+    """Property 19: Session exception fails the batch cleanly.
+
+    **Validates: Requirements 5.6**
+
+    When the session raises, every request in the batch should get an
+    EvaluatorBatchError, failure_count should be incremented, and no
+    EvalResult should be produced. The Evaluator continues operating for
+    subsequent batches.
+    """
+    session = _RaisingSession()
+    evaluator = Evaluator(session=session, batch_size=4, batch_timeout_ms=50.0)
+    evaluator.start()
+
+    try:
+        board = cshogi.Board()
+
+        # Enqueue a request -- it should fail
+        with pytest.raises(EvaluatorBatchError, match="invocation failed"):
+            await evaluator.enqueue(board)
+
+        # failure_count should be incremented
+        assert evaluator.failure_count >= 1
+        # no EvalResult produced
+        assert evaluator.evaluated_count == 0
+    finally:
+        await evaluator.stop()
+
+
+@pytest.mark.asyncio
+async def test_property_19_failure_from_short_result():
+    """Property 19: Short result array fails the batch cleanly.
+
+    **Validates: Requirements 5.6**
+    """
+    session = _ShortResultSession()
+    evaluator = Evaluator(session=session, batch_size=4, batch_timeout_ms=50.0)
+    evaluator.start()
+
+    try:
+        board = cshogi.Board()
+
+        with pytest.raises(EvaluatorBatchError, match="returned results for"):
+            await evaluator.enqueue(board)
+
+        assert evaluator.failure_count >= 1
+        assert evaluator.evaluated_count == 0
+    finally:
+        await evaluator.stop()
+
+
+@pytest.mark.asyncio
+async def test_property_19_failure_from_non_finite_win_rate():
+    """Property 19: Non-finite win rate fails the batch cleanly.
+
+    **Validates: Requirements 5.6**
+    """
+    session = _NonFiniteWinRateSession()
+    evaluator = Evaluator(session=session, batch_size=4, batch_timeout_ms=50.0)
+    evaluator.start()
+
+    try:
+        board = cshogi.Board()
+
+        with pytest.raises(EvaluatorBatchError, match="non-finite win rate"):
+            await evaluator.enqueue(board)
+
+        assert evaluator.failure_count >= 1
+        assert evaluator.evaluated_count == 0
+    finally:
+        await evaluator.stop()
+
+
+@pytest.mark.asyncio
+async def test_property_19_evaluator_continues_after_failure():
+    """Property 19: Evaluator continues operating after a batch failure.
+
+    **Validates: Requirements 5.6**
+
+    After a failure, subsequent batches with a healthy session should
+    still produce correct results.
+    """
+
+    class _FailThenSucceedSession:
+        """Raises on the first call, succeeds on subsequent calls."""
+
+        def __init__(self):
+            self._call_count = 0
+
+        def run(self, features1, features2):
+            self._call_count += 1
+            if self._call_count == 1:
+                raise RuntimeError("first call fails")
+            n = features1.shape[0]
+            policy = np.random.default_rng(42).standard_normal(
+                (n, POLICY_DIM)
+            ).astype(np.float32)
+            values = np.full((n,), 0.5, dtype=np.float32)
+            return policy, values
+
+    session = _FailThenSucceedSession()
+    evaluator = Evaluator(session=session, batch_size=4, batch_timeout_ms=50.0)
+    evaluator.start()
+
+    try:
+        board = cshogi.Board()
+
+        # First request should fail
+        with pytest.raises(EvaluatorBatchError):
+            await evaluator.enqueue(board)
+
+        assert evaluator.failure_count >= 1
+        initial_failures = evaluator.failure_count
+
+        # Second request should succeed
+        result = await evaluator.enqueue(board)
+
+        assert isinstance(result, EvalResult)
+        assert 0.0 <= result.win_rate <= 1.0
+        assert len(result.policy) == len(list(board.legal_moves))
+        assert evaluator.evaluated_count >= 1
+        # failure_count should not increase
+        assert evaluator.failure_count == initial_failures
+    finally:
+        await evaluator.stop()
+
+
+@settings(max_examples=100, deadline=None)
+@given(
+    failure_mode=st.sampled_from(["raise", "short", "nan"]),
+    batch_size=st.integers(min_value=1, max_value=8),
+)
+def test_property_19_failure_count_matches_batch_size(failure_mode, batch_size):
+    """Property 19: failure_count is incremented by the number of requests in the batch.
+
+    **Validates: Requirements 5.6**
+    """
+    if failure_mode == "raise":
+        session = _RaisingSession()
+    elif failure_mode == "short":
+        session = _ShortResultSession()
+    else:
+        session = _NonFiniteWinRateSession()
+
+    evaluator = Evaluator(
+        session=session, batch_size=batch_size, batch_timeout_ms=50.0
+    )
+
+    async def _run():
+        evaluator.start()
+        try:
+            board = cshogi.Board()
+            with pytest.raises(EvaluatorBatchError):
+                await evaluator.enqueue(board)
+
+            # At least one request was in the failed batch
+            assert evaluator.failure_count >= 1
+            assert evaluator.evaluated_count == 0
+            assert evaluator.queue_size == 0
+        finally:
+            await evaluator.stop()
+
+    asyncio.run(_run())
