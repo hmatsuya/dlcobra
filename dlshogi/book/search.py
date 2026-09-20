@@ -562,27 +562,30 @@ class SearchCoordinator:
         # C_PUCT constant (design.md uses sqrt(2) as the standard value)
         c_puct = 2.0 ** 0.5
 
-        # Ensure root node exists
+        # Ensure root node exists (Requirement 4.8). When absent, the root
+        # is created with visit count 0 and value sum 0 by the descent's
+        # own expansion path (termination rule 3 below), which is the same
+        # atomic insert_expansion every other node uses. An edgeless
+        # placeholder view is handed to the loop so rule 3 fires and the
+        # root is inserted *with* its edges (Requirement 4.3); pre-inserting
+        # an empty edgeless row here would instead be retained by
+        # ON CONFLICT DO NOTHING and permanently block the root's own
+        # expansion, so no separate root INSERT is issued.
         result, root_view = await self._store.get(root_key)
         if result == GetResult.ABSENT:
-            # Create root node (visit_count=0, value_sum=0)
-            root_write = ExpansionWrite(
+            root_view = BookNodeView(
                 key=root_key,
                 sfen=config.root_position,
                 apery_key=apery_book_key(config.root_position),
+                visit_count=0,
+                value_sum=0.0,
                 terminal=Terminal.NONE,
+                cyclic_flag=False,
                 eval_win_rate=None,
-                edges=(),
+                prop_value=None,
+                prop_best_move16=None,
+                edges=np.empty(0, dtype=PACKED_EDGE),
             )
-            write_result = await self._store.insert_expansion(root_write)
-            if write_result.outcome == WriteOutcome.FAILED:
-                _LOG.error("Failed to create root node")
-                return
-            # Re-read root
-            result, root_view = await self._store.get(root_key)
-            if result != GetResult.FOUND:
-                _LOG.error("Root node not found after creation")
-                return
         elif result == GetResult.FAILED:
             _LOG.error("Failed to read root node")
             return
@@ -742,10 +745,24 @@ class SearchCoordinator:
                 self.descents_abandoned += 1
                 return
 
-            # Move to the selected child
+            # Move to the selected child. Edges store the 16-bit move code
+            # (cshogi.move16); board.push needs the full move, recovered with
+            # board.move_from_move16 (the same reconstruction export.py uses).
+            # A move16 that does not resolve to a legal move here means the
+            # descent's board has diverged from the edge list's node, which
+            # must never happen; guard and abandon rather than push an
+            # illegal move.
             selected_edge = edges[selected_idx]
             move16 = int(selected_edge["move16"])
-            move = cshogi.move16_to_move(move16, board)
+            move = board.move_from_move16(move16)
+            if move not in board.legal_moves:
+                _LOG.error(
+                    "Worker %d: selected edge move16=%d is not legal at %s",
+                    worker_id,
+                    move16,
+                    board.sfen(),
+                )
+                return
             board.push(move)
             depth += 1
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
+import cshogi
 import numpy as np
 
 from dlshogi import cppshogi
@@ -73,7 +74,14 @@ def position_keys_after(sfen: str, moves16) -> np.ndarray:
     want. The result is a ``POSITION_KEY``-dtype array of the same length
     as ``moves16``, in the same order.
     """
-    ndmoves16 = np.asarray(moves16, dtype="<u2")
+    # ``np.ascontiguousarray`` (not just ``np.asarray``) because a caller may
+    # pass a strided column view of a ``PACKED_EDGE`` structured array (e.g.
+    # ``decode_edges(...)["move16"]``, whose stride is the 20-byte edge
+    # record, not 2 bytes). That view already has dtype ``<u2``, so
+    # ``np.asarray`` would keep it non-contiguous, and the C binding reads
+    # the buffer assuming contiguous ``<u2`` memory -- producing wrong keys
+    # for every element past the first. A contiguous copy is required.
+    ndmoves16 = np.ascontiguousarray(moves16, dtype="<u2")
     ndkeys = np.empty(len(ndmoves16), dtype=POSITION_KEY)
     if len(ndmoves16) > 0:
         cppshogi.position_keys_after(sfen, ndmoves16, ndkeys)
@@ -81,14 +89,26 @@ def position_keys_after(sfen: str, moves16) -> np.ndarray:
 
 
 def apery_book_key(sfen: str) -> int:
-    """Return the 64-bit Apery ``Book::bookKey`` of the Board_State ``sfen``.
+    """Return cshogi's game-time ``Board.book_key()`` for ``sfen``.
 
     This is the key stored in ``book_node.apery_key`` for export
-    (Requirement 12.1); it is not a Position_Key and must not be used as
-    one, because it hashes only the mover's hand (see design.md's
-    "Position_Key from Python" section).
+    (Requirement 12.1). It MUST equal ``cshogi.Board.book_key()`` for the
+    position, because that is the key the USI engine and
+    ``dlshogi/utils/book.py`` look exported rows up by at game time; a key
+    derived from any other Zobrist tables would make the exported
+    ``book.bin`` unreadable by the game-time engine. cshogi's tables and
+    this repo's ``cppshogi`` tables use different random constants, so the
+    value is derived here from cshogi directly rather than from
+    ``cppshogi.apery_book_key_from_sfen`` (which remains only as an
+    internal cross-check of ``Book::bookKey()``, per design.md).
+
+    It is not a Position_Key and must not be used as one, because it
+    hashes only the mover's hand (see design.md's "Position_Key from
+    Python" section). ``apery_book_key`` is called once per node
+    expansion (not per edge), so constructing a ``cshogi.Board`` here is
+    negligible.
     """
-    return int(cppshogi.apery_book_key_from_sfen(sfen))
+    return int(cshogi.Board(sfen).book_key())
 
 
 def zobrist_fingerprint() -> int:

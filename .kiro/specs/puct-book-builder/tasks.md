@@ -563,31 +563,31 @@ example, not 100 short ones.
   - Ensure all tests pass, ask the user if questions arise.
   - `pytest -m "not db"` and the full suite including `db` both pass; all 48 properties are implemented, each by exactly one property-based test
 
-- [ ] 19. Integration and scale verification
-  - [ ]* 19.1 Write the scale, latency, and structural integration test
+- [x] 19. Integration and scale verification
+  - [x]* 19.1 Write the scale, latency, and structural integration test
     - Extend `tests/book/test_integration.py`: generate a synthetic 10^8-Book_Node graph with an asyncpg `copy_records_to_table` loader using the exact packed encoding, then run a real search for at least 300 s of warmup plus a measurement window
     - Sample 10,000 consecutive node-plus-edges reads for the 20 ms p95 / 200 ms p99 bound, 10,000 consecutive descents for the 1000 ms p95 / 10,000 ms max bound, 60-second windows for the descent rate and the mean Evaluator batch size, and RSS every 10 s for the memory bound
     - The three structural assertions that validate the storage design rather than the code: `pg_column_size(edges) <= 2000` sampling (rows stay inline, not TOASTed), `pg_stat_user_tables.n_tup_hot_upd / n_tup_upd > 0.95` (backups stay HOT), and the measured per-process descent rate falling inside the 600-1,250/s band the Performance budget predicts. A measured rate outside that band means the design document's model is wrong and the document is what gets fixed
     - Assert the search session's effective `synchronous_commit = off` and that `book_node` is a logged relation
     - _Requirements: 1.5, 15.1, 15.2, 15.3, 15.4, 15.7_
 
-  - [ ]* 19.2 Write the crash-recovery and connection-loss integration tests
+  - [x]* 19.2 Write the crash-recovery and connection-loss integration tests
     - `SIGKILL` at randomized points during expansion writes and during accumulator flushes, restart, and assert every Position_Key is either absent or complete and that the run resumes
     - Terminate backends with `pg_terminate_backend` during a search and assert suspension, reconnection on the schedule, and resumption
     - _Requirements: 2.9, 9.6, 10.3, 10.7_
 
-  - [ ]* 19.3 Write the multi-process integration test
+  - [x]* 19.3 Write the multi-process integration test
     - Two search processes against one database with overlapping search regions; assert exactly one row per Position_Key, a duplicate count consistent with the observed overlap, and no lost counter updates across the two processes
     - Also assert the Terashock_Index 1 ms p95 lookup bound over an index of at least 10^7 entries
     - _Requirements: 7.1, 11.1, 11.6_
 
-  - [ ]* 19.4 Write the end-to-end book interoperability test
+  - [x]* 19.4 Write the end-to-end book interoperability test
     - A small real search, a propagation pass, and an export; then read the resulting `book.bin` back through the existing `dlshogi/utils/book.py` and through cshogi's `BookEntry` dtype and `Board.book_key()`, confirming an independent reader agrees on keys, moves, counts, and scores
     - This is the only check that proves the exported file works with the game-time engine, which is the whole point of the export
     - Also export and re-parse the YaneuraOu `.db` output through `tests/book/reference/book_db.py`
     - _Requirements: 12.1, 12.2, 12.3, 12.4, 12.6, 12.7, 12.11, 12.12_
 
-- [ ] 20. Final checkpoint
+- [~] 20. Final checkpoint
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes

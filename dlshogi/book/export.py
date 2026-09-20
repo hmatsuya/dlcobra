@@ -282,9 +282,14 @@ async def _phase1_generate_runs(
                     move16_list = edges["move16"].tolist()
 
                     # Batched child lookup: fetch prop_value, prop_epoch,
-                    # terminal, eval_win_rate for all child positions.
+                    # terminal, eval_win_rate for all child positions. The
+                    # cursor's own connection is reused rather than acquiring
+                    # a second one from the pool: the server-side cursor holds
+                    # this connection inside an open transaction for the whole
+                    # scan, so a nested pool.acquire() would deadlock whenever
+                    # the pool is size 1 (Worker_Count == 1).
                     child_info = await _batch_child_lookup(
-                        pool, sfen, move16_list, propagation_done_seq
+                        conn, sfen, move16_list, propagation_done_seq
                     )
 
                     # Entries for YaneuraOu export (collected per-node).
@@ -412,7 +417,7 @@ def _flush_yaneuraou_run(
 
 
 async def _batch_child_lookup(
-    pool: asyncpg.Pool,
+    conn: asyncpg.Connection,
     sfen: str,
     move16_list: List[int],
     propagation_done_seq: int,
@@ -421,6 +426,11 @@ async def _batch_child_lookup(
 
     Returns a dict mapping move16 -> {prop_value, prop_epoch, terminal, eval_win_rate}.
     Uses position_keys_after to derive child keys from the parent sfen and moves.
+
+    Runs on the connection the caller already holds (the one driving the
+    server-side cursor), never on a freshly acquired pool connection: with a
+    size-1 pool a nested acquire would block forever on the connection the
+    cursor still owns.
     """
     from dlshogi.book.keys import position_keys_after, fold_u64_to_i64
 
@@ -438,15 +448,14 @@ async def _batch_child_lookup(
     key_his = [fold_u64_to_i64(int(child_keys[i]["hi"])) for i in range(len(child_keys))]
     key_los = [fold_u64_to_i64(int(child_keys[i]["lo"])) for i in range(len(child_keys))]
 
-    # Query all child nodes in one batch.
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT key_hi, key_lo, prop_value, prop_epoch, terminal, eval_win_rate "
-            "FROM book_node WHERE (key_hi, key_lo) IN "
-            "(SELECT unnest($1::bigint[]), unnest($2::bigint[]))",
-            key_his,
-            key_los,
-        )
+    # Query all child nodes in one batch on the caller's connection.
+    rows = await conn.fetch(
+        "SELECT key_hi, key_lo, prop_value, prop_epoch, terminal, eval_win_rate "
+        "FROM book_node WHERE (key_hi, key_lo) IN "
+        "(SELECT unnest($1::bigint[]), unnest($2::bigint[]))",
+        key_his,
+        key_los,
+    )
 
     # Build a lookup from (key_hi, key_lo) -> row data.
     row_map = {}
