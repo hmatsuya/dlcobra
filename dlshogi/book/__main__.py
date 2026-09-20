@@ -305,8 +305,9 @@ def _search_child_process(
     model_path: str,
     verbose: bool,
     log_path: Optional[str],
+    process_count: int,
 ) -> None:
-    """Entry point for a child search process (one per GPU).
+    """Entry point for a child search process (one per process-count argument).
 
     Repeats the read-only half of the startup checks (C4-C9), then runs
     the SearchCoordinator on its assigned GPU.
@@ -328,7 +329,7 @@ def _search_child_process(
     _import_cppshogi()
 
     # Run the async startup and search.
-    asyncio.run(_search_child_async(cfg, gpu_id, model_path, verbose, log_path))
+    asyncio.run(_search_child_async(cfg, gpu_id, model_path, verbose, log_path, process_count))
 
 
 async def _search_child_async(
@@ -337,6 +338,7 @@ async def _search_child_async(
     model_path: str,
     verbose: bool,
     log_path: Optional[str],
+    process_count: int,
 ) -> None:
     """Async portion of the child search process."""
     from dlshogi.book.evaluator import Evaluator, OnnxRuntimeInferenceSession
@@ -380,7 +382,8 @@ async def _search_child_async(
     # Create the ProgressReporter.
     reporter = ProgressReporter(
         report_interval=cfg.report_interval,
-        throughput_floor=cfg.throughput_floor,
+        # Requirement 14.4: Throughput_Floor is an invocation aggregate.
+        throughput_floor=cfg.throughput_floor / process_count,
         throughput_grace_period=cfg.throughput_grace_period,
         verbose=verbose,
         log_path=log_path,
@@ -533,7 +536,7 @@ async def _search_parent_process(
     for gpu_id in range(gpu_count):
         proc = multiprocessing.Process(
             target=_search_child_process,
-            args=(config_path, gpu_id, model_path, verbose, log_path),
+            args=(config_path, gpu_id, model_path, verbose, log_path, gpu_count),
             name=f"book-search-gpu{gpu_id}",
             daemon=False,
         )

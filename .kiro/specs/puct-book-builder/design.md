@@ -565,7 +565,8 @@ The requirements' **Search_Worker** is realised as one asyncio task running one 
 a time — "descent task" throughout this document. Wherever a requirement says Search_Worker, read
 descent task; the mapping is one to one, and `Worker_Count` counts tasks rather than OS threads.
 
-One process per GPU, one event loop, `Worker_Count` concurrent descent tasks, one shared
+One process per search-command process-count argument (default 1, typically one per GPU;
+Requirement 13.10), one event loop, `Worker_Count` concurrent descent tasks, one shared
 `NodeStore` and one asyncpg pool per process (Requirement 11.1). The coordinator holds an
 `asyncio.TaskGroup`-style supervisor: it keeps exactly `Worker_Count` descent tasks alive while no
 stop request is pending, replacing each task as it completes (Requirement 4.13). Each task owns its
@@ -586,7 +587,7 @@ q     = np.where(n_eff > 0, w / np.maximum(n_eff, 1.0), q0)     # w unchanged: v
 score = q + c_puct * p * (np.sqrt(n_par) / (1.0 + n_eff))
 ```
 
-`w` needs no perspective flip, and that is only because a Book_Edge's accumulated value sum is stored
+`c_puct` is the configured `Puct_Exploration_Constant` (Requirements 4.2, 13.1, 13.7). `w` needs no perspective flip, and that is only because a Book_Edge's accumulated value sum is stored
 from the perspective of the side to move at the parent Book_Node (Requirement 4.4). So `q` is already
 the parent's win rate and maximising `score` selects the move that favours the side actually choosing
 it.
@@ -748,7 +749,8 @@ timestamp on each iteration.
 **Inference: ONNX through onnxruntime, TensorRT execution provider first.** The steering guidance
 for this repository names ONNX plus TensorRT as the production inference path (about 2-3x over
 `torch.compile`, roughly 3-4x over the PyTorch baseline), and `dlshogi/convert_model_to_onnx.py`
-already produces the model. The Evaluator therefore loads a single `.onnx` file with
+already produces the model. The Evaluator therefore loads the ONNX model file named by the
+search command's model argument (Requirement 13.10) with
 
 ```python
 session = ort.InferenceSession(
@@ -861,6 +863,10 @@ t_raw(e)   = e has Terashock eval ? exp(win_rate(e.ts_eval) / tau) : 0
 t(e)       = sum(t_raw) == 0 ? 0 : t_raw(e) / sum(t_raw)
 prior(e)   = (1 - Terashock_Prior_Weight) * policy(e) + Terashock_Prior_Weight * t(e)
 ```
+
+`tau` is fixed at 1.0 and is not a configuration value, so `t_raw` reduces to
+`exp(win_rate)` and `t` is the normalised Terashock-derived weight of Requirement 7
+criterion 3.
 
 `win_rate(score) = 1 / (1 + exp(-score / Eval_Coef))`, the inverse of the
 `-log(1/wp - 1) * eval_coef` conversion used by `usi/UctSearch.cpp` and by
@@ -1391,7 +1397,7 @@ Concretely, per frame:
    that is the only branch that consults the memo. A node whose value was derived through repetition
    is path-dependent, so the walk recomputes it from its children on the current path even if
    `prop_epoch = pass_id`. Its recomputed value is still written, since Requirement 9.1 demands
-   exactly one propagated value per node; the value written is the one from the last path that
+   exactly one propagated value per reachable node; the value written is the one from the last path that
    reached it, which is deterministic, and that is what Property 27 (idempotence) needs. Where the
    edge to a flagged child is below the threshold, branch 3 fires first and the flagged node is
    neither recomputed nor rewritten — so the threshold *narrows* the set of nodes whose stored value
@@ -1454,9 +1460,10 @@ terms.
 
 **Consequence for nodes below the frontier.** A Book_Node reachable only through below-threshold
 Book_Edges is never pushed as a frame, so the pass writes it no `prop_value` and leaves its
-`prop_epoch` at whatever an earlier pass left. Requirement 9.1's "exactly one propagated value for
-every reachable Book_Node" is satisfied over the above-threshold subgraph, which is what criteria 12
-to 15 ask for; the rest of the graph carries a stale value or none. Requirement 12.9 covers exactly
+`prop_epoch` at whatever an earlier pass left. The frames the pass pushes are exactly the Book_Nodes
+Requirement 9.1's reachability clause names — those reachable through Book_Edges at or above the
+threshold — so that demand is met with no deviation; the rest of the graph carries a stale value or
+none, which is what criteria 12 to 15 ask for. Requirement 12.9 covers exactly
 that: it excludes a Book_Edge whose child has no propagated value *or* whose propagated value is
 stale, stale meaning one the Value_Propagator did not compute during the most recently completed
 Propagation_Pass, which here is `prop_value IS NULL OR prop_epoch <> propagation_done_seq`; such
@@ -1508,11 +1515,12 @@ at device bandwidth) with no predicate at all: Requirement 12.12 exports the Boo
 to move, so the scan covers every row and the only exclusions are the per-Book_Edge ones below. For
 each node the exporter reconstructs the `Board` from `sfen`, decodes the edges, and for each edge:
 
-- exclude when `edge.visit_count / node.visit_count < Export_Visit_Threshold` (Requirement 12.5);
 - exclude when `node.visit_count = 0`, or the child has no `prop_value`, or the child's `prop_value`
   is stale, which is `prop_value IS NULL OR prop_epoch <> propagation_done_seq` (Requirement 12.9)
   -- so the batched lookup of the child keys fetches `prop_epoch` alongside `prop_value`, cached in
-  the node LRU;
+  the node LRU; the guard runs first so the ratio in the next item is never a division by zero;
+- exclude when `edge.visit_count / node.visit_count < Export_Visit_Threshold` for nodes with a
+  non-zero visit count (Requirement 12.5);
 - assert `board.move_from_move16(move16)` is a member of `board.legal_moves` (Requirement 12.7) and
   abort the export on failure, since a violation means the graph is corrupt;
 - emit a `cshogi.BookEntry` record with `key = node.apery_key`, `fromToPro = move16`,
@@ -1577,7 +1585,10 @@ Requirement 12.4 asks for exactly that), and writes runs; phase 2 merges with `h
 streams through Book_DB_Printer. Requirement 6.6 needs the entry count on the *second* line, which
 phase 1 already knows exactly before phase 2 opens the output, so the header is written first and no
 rewind is needed. Within an entry, Terashock_Moves are ordered descending by evaluation value
-(Requirement 12.4).
+(Requirement 12.4). The fields of each entry are mapped from the record: `move` is the recorded
+move, `reply` is always the literal `none`, `eval` is the score computed in Requirement 12.4
+criterion 6, `depth` is the recorded Terashock search depth (0 when no Terashock evaluation is
+recorded), and `count` is the recorded visit count.
 
 ### Book_DB_Parser and Book_DB_Printer data model
 
@@ -1659,12 +1670,13 @@ What it means in practice, and the mitigations:
 
 - **Process count is the primary lever.** `search` runs one OS process per GPU, each with its own
   event loop, its own asyncpg pool, and its own In_Flight_Set, over one shared database. Eight GPUs
-  give 5,000-10,000 descents/s. Process count is a configuration value independent of GPU count, so
+  give 5,000-10,000 descents/s. Process count is a search-command argument (Requirement 13.10) independent of GPU count, so
   additional pure-search processes may be run against the same database and the same GPU when the
   GPU is not the constraint; the cross-process duplicate expansion this permits is bounded and
   handled by Requirement 11.6, as *In_Flight_Set* explains.
-- **Throughput_Floor must be configured against the measured rate.** Requirement 15.2 asks the run
-  to sustain the *configured* floor, and Requirement 13.7 admits 0.01 to 100,000 descents/s. A floor
+- **Throughput_Floor must be configured against the measured rate.** Requirement 15.2 asks each search process to sustain the *configured* floor divided by the
+  number of search processes (the invocation's aggregate floor), and Requirement 13.7 admits
+  0.01 to 100,000 descents/s. A floor
   set for a C++ builder will trip Requirement 14.4's degraded-throughput warning permanently. The
   configuration validator warns when `Throughput_Floor > 1500 * process_count`, naming the measured
   per-process ceiling in the warning.
@@ -1890,7 +1902,7 @@ strategy.
 ### Property 12: PUCT selection maximises the score and breaks ties by USI order
 
 *For any* parent visit count, any edge array with arbitrary visit counts, value sums, priors,
-Terashock evaluations, and in-flight membership, and any exploration constant in [0.1, 5.0] and
+Terashock evaluations, and in-flight membership, and any Puct_Exploration_Constant in [0.1, 5.0] and
 Virtual_Loss in 0 to 16, the selected edge attains the maximum PUCT score over the non-excluded
 edges, and where two or more non-excluded edges attain scores within 1e-6 of that maximum, the
 selected edge's move in USI notation is the lexicographically smallest among them.
@@ -2430,11 +2442,11 @@ Strategy: driven directly from the Requirement 13 criterion 7 range table, expre
 For each value the strategy emits the lower endpoint, the upper endpoint, one step below the lower
 endpoint, one step above the upper endpoint, and an arbitrary in-range value, via
 `st.sampled_from` over a per-value list built from the table; subsets of values to omit or perturb
-from `st.lists(st.booleans(), min_size=19, max_size=19).filter(any)`, one boolean per value named by
+from `st.lists(st.booleans(), min_size=20, max_size=20).filter(any)`, one boolean per value named by
 Requirement 13 criterion 1. Because the strategy is generated from the range table rather than from a
 hand-written list, `Propagation_Visit_Threshold` and its 0 to 1,000,000 integer range are picked up
 automatically as soon as the table row exists; the only edit a change to the configuration surface
-forces on this property is the subset mask width, which Requirement 13 criterion 1 fixes at 19.
+forces on this property is the subset mask width, which Requirement 13 criterion 1 fixes at 20.
 
 **Validates: Requirements 13.2, 13.3, 13.5, 13.7**
 
@@ -2975,7 +2987,7 @@ recognition and the range table's contents are configuration facts, not behaviou
 | 12.10 unopenable output path | temporary file plus `os.replace()`; unit test |
 | 12.11 export counts | `ExportCounts`, whose excluded total is the criterion 5 count plus the criterion 9 count; Property 38 |
 | 12.12 both sides to move are exported | the phase-1 server-side cursor carries no side-to-move predicate, so the heap scan covers every Book_Node and the only exclusions are criteria 5, 7, and 9; the load-bearing reason is `probeConsideringDrawDepth`'s recursion through opponent replies, recorded in *Why the propagation pass exists at all*; Property 38 |
-| 13.1 configuration surface | `config.py` `Config_Loader`, nineteen values including `Propagation_Visit_Threshold`, consumed by the `propagate` command as `cfg.propagation_visit_threshold` in the frame partition of *Value propagation under a packed edge list*; smoke test |
+| 13.1 configuration surface | `config.py` `Config_Loader`, twenty values including `Propagation_Visit_Threshold`, consumed by the `propagate` command as `cfg.propagation_visit_threshold` in the frame partition of *Value propagation under a packed edge list*; smoke test |
 | 13.2 absent values | collected and reported together before any schema work; Property 41 |
 | 13.3 out-of-range values | same; Property 41 |
 | 13.4 accept the four commands | `argparse` subcommands in `dlshogi/book/__main__.py`; smoke test |
@@ -2984,6 +2996,7 @@ recognition and the range table's contents are configuration facts, not behaviou
 | 13.7 permitted ranges | one range table in `config.py` consumed by both the validator and Property 41's strategy, so `Propagation_Visit_Threshold`'s 0 to 1,000,000 integer range is picked up by adding the table row alone; `Export_Visit_Threshold` stays a [0, 1] ratio and the two are distinct table entries with distinct kinds, which is what keeps the absolute count and the ratio from being conflated; additionally the two sizing warnings of *Performance budget* (`Throughput_Floor > 1500 * process_count`, `Batch_Size > 2 * Throughput_Floor * Batch_Timeout`), which are warnings and not range violations |
 | 13.8 absent Terashock path | startup flow C15; unit test |
 | 13.9 import-terashock without a path | command-level rejection; unit test |
+| 13.10 search command arguments | `--model` (required ONNX path) and `--gpu-count` (process count, default 1) of the `search` subcommand; unit test |
 | 14.1 progress record contents and deadline | `report.py` over stdlib `logging` with a rotating file handler, `loop.call_later` on the interval boundary, incrementally maintained counters, numpy bucketed histograms; per-process files merged by `--merge`; integration test |
 | 14.2 Terashock counters | plain `int` counters on the single event loop, no atomics needed; Property 43 |
 | 14.3 verbose move sequences | descent path logging; Property 45 |
@@ -2992,7 +3005,7 @@ recognition and the range table's contents are configuration facts, not behaviou
 | 14.6 failure and duplicate counters | plain `int` counters; Property 43 |
 | 14.7 unwritable log destination | rate-limited operator report; unit test |
 | 15.1 descent latency | one page read per node, batched prefetch, coalesced backups; *Performance budget* shows the Python term is 0.8-1.6 ms against a 2-40 ms I/O term and a 1000 ms budget; integration test |
-| 15.2 sustained descent rate | accumulator coalescing, asyncpg pipelining, `synchronous_commit = off`, and **one OS process per GPU as the parallelism mechanism**; *Performance budget* states the honest per-process ceiling of ~600-1,250 descents/s, the `Throughput_Floor` sizing warning, and the Cython escape hatch for the 15.2 us scoring step; integration test measures the real rate against that prediction |
+| 15.2 sustained descent rate | accumulator coalescing, asyncpg pipelining, `synchronous_commit = off`, and **one OS process per search-command process-count argument (Requirement 13.10) as the parallelism mechanism**; *Performance budget* states the honest per-process ceiling of ~600-1,250 descents/s, the `Throughput_Floor` sizing warning, and the Cython escape hatch for the 15.2 us scoring step; integration test measures the real per-process rate against the configured floor divided by the number of search processes (Requirement 14.4) |
 | 15.3 node-plus-edges read latency | inline packed edges, 20-byte records, `fillfactor = 70`, `SET STORAGE MAIN`; integration test retains the `pg_column_size(edges) <= 2000` and `n_tup_hot_upd / n_tup_upd > 0.95` assertions, both language-independent |
 | 15.4 resident memory bound | node LRU, Terashock lookups in PostgreSQL rather than mmap, `np.frombuffer` views rather than per-edge Python objects, RSS sampler |
 | 15.5 cache release under pressure | RSS sampler driving LRU eviction; Property 47 |

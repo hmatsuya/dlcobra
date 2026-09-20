@@ -107,7 +107,7 @@ example, not 100 short ones.
 
 - [x] 4. Configuration loading and validation
   - [x] 4.1 Implement `dlshogi/book/config.py`
-    - `BookConfig` holding the nineteen values of Requirement 13 criterion 1
+    - `BookConfig` holding the twenty values of Requirement 13 criterion 1
     - The Requirement 13 criterion 7 permitted-range table expressed **once** as a table of `(name, kind, low, high)` rows, consumed by both the validator and Property 41's generator; `Propagation_Visit_Threshold` (absolute count, 0 to 1,000,000) and `Export_Visit_Threshold` (ratio, 0 to 1) are distinct rows with distinct kinds
     - Collect every absent and every out-of-range value and report them together with name, supplied value, and permitted range, then exit before any schema work or record write
     - Credential redaction for the startup configuration log
@@ -495,7 +495,7 @@ example, not 100 short ones.
 
   - [x] 15.6 Implement the YaneuraOu `.db` export path
     - Phase 1 emits length-prefixed `(sfen, move-line block)` records, sorted by `bytes` SFEN keys, which is Python's native byte-wise order and exactly what Requirement 12.4 asks for
-    - Phase 2 merges with `heapq.merge` and streams through Book_DB_Printer; the entry count is known before phase 2 opens the output so the `# NOE:` line needs no rewind; Terashock_Moves within an entry are ordered descending by evaluation value
+    - Phase 2 merges with `heapq.merge` and streams through Book_DB_Printer; the entry count is known before phase 2 opens the output so the `# NOE:` line needs no rewind; Terashock_Moves within an entry are ordered descending by evaluation value; each entry maps `move` to the recorded move, `reply` to the literal `none`, `eval` to the score, `depth` to the recorded Terashock search depth or 0, and `count` to the visit count (Requirement 12.4)
     - _Requirements: 12.4, 12.10, 12.11, 12.12_
 
   - [ ]* 15.2 Write property test for export record mapping
@@ -547,9 +547,9 @@ example, not 100 short ones.
   - [x] 17.1 Wire `dlshogi/book/__main__.py` and the startup flow
     - `argparse` subcommands `search`, `propagate`, `export`, `import-terashock` dispatching to the implemented components
     - The startup order of the design's Error Handling flow: load and validate configuration, log it with credentials redacted, import `dlshogi.cppshogi`, connect with the retry schedule, create or repair the schema, check version and Zobrist fingerprint, check the Root_Position, import or verify the Terashock index, count and truncate `in_flight_claim`, then accept commands
-    - `search` spawns one OS process per GPU, each repeating the read-only half of the checks and exiting if any disagrees; only the parent creates or repairs the schema; the parent forwards stop signals to every child inside one 60 s budget
+    - `search` takes, as arguments, the ONNX model path and the process count (default 1) (Requirement 13.10) and spawns one OS process per process-count argument, each repeating the read-only half of the checks and exiting if any disagrees; only the parent creates or repairs the schema; the parent forwards stop signals to every child inside one 60 s budget
     - Reject `import-terashock` when no Terashock path is configured, and reject any command under an invalid configuration
-    - _Requirements: 4.10, 4.13, 10.5, 10.6, 11.1, 13.1, 13.4, 13.5, 13.8, 13.9_
+    - _Requirements: 4.10, 4.13, 10.5, 10.6, 11.1, 13.1, 13.4, 13.5, 13.8, 13.9, 13.10_
 
   - [ ]* 17.2 Write the example tests for the criteria the design classified as EXAMPLE
     - `tests/book/test_units.py`: the three-way `get` result distinction; a fault-injected expansion write failure; connection-failure and schema-creation-failure reports and exits; Root_Position recording and read-back; a forged Position_Key collision row; descent start at the root at depth 0; root node creation when absent; the 100 ms restart after an abandoned descent; the three unreadable Terashock-input cases; the propagation report; propagate with no root row; stop within 60 s, no work while stopping, forced shutdown, and root mismatch; the three propagation-freshness states of the stale-propagation warning; the two unopenable-output-path cases; absent Terashock path and rejected `import-terashock`; the unwritable log destination
