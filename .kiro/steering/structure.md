@@ -31,10 +31,11 @@ DeepLearningShogi/
 │   │       ├── profile_detailed.py  # Detailed profiling (optional)
 │   │       └── docs/           # Experiment-specific docs (optional)
 │   │           └── README.md   # Profiling results, analysis
-│   └── utils/                  # Data conversion & analysis tools
-│       ├── csa_to_hcpe*.py     # CSA → HCPE converters
-│       ├── hcpe_to_hdf5.py     # HCPE → HDF5 converter
-│       └── stat_*.py           # Dataset statistics
+│   ├── utils/                  # Data conversion & analysis tools
+│   │   ├── csa_to_hcpe*.py     # CSA → HCPE converters
+│   │   ├── hcpe_to_hdf5.py     # HCPE → HDF5 converter
+│   │   └── stat_*.py           # Dataset statistics
+│   └── book/                   # PUCT opening-book builder (spec: .kiro/specs/puct-book-builder/)
 │
 ├── cppshogi/                   # C++ Shogi library (Apery-based)
 │   ├── position.cpp/hpp        # Board state management
