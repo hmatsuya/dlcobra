@@ -397,6 +397,7 @@ async def _search_child_async(
         node_store=store,
         evaluator=evaluator,
         terashock_index=terashock_idx,
+        reporter=reporter,
     )
 
     try:
@@ -492,6 +493,7 @@ async def _search_single_process(
         node_store=store,
         evaluator=evaluator,
         terashock_index=terashock_idx,
+        reporter=reporter,
     )
 
     try:

@@ -23,7 +23,10 @@ import logging
 import signal
 import time
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, List, Optional, Sequence
+
+if TYPE_CHECKING:
+    from dlshogi.book.report import ProgressReporter
 
 import cshogi
 import numpy as np
@@ -326,11 +329,13 @@ class SearchCoordinator:
         node_store: NodeStore,
         evaluator: Evaluator,
         terashock_index: Optional[TerashockIndex] = None,
+        reporter: Optional["ProgressReporter"] = None,
     ) -> None:
         self._config = config
         self._store = node_store
         self._evaluator = evaluator
         self._terashock = terashock_index
+        self._reporter = reporter
 
         self.in_flight = InFlightSet()
         self._reaper = ClaimReaper(self.in_flight)
@@ -695,8 +700,12 @@ class SearchCoordinator:
 
                     if write_result.outcome == WriteOutcome.COMMITTED:
                         self.expansions_committed += 1
+                        if self._reporter is not None:
+                            self._reporter.record_node_created(len(edges_data))
                     elif write_result.outcome == WriteOutcome.DUPLICATE:
                         self.expansions_duplicate += 1
+                        if self._reporter is not None:
+                            self._reporter.record_event("duplicate_node_creation")
                     elif write_result.outcome == WriteOutcome.COLLISION:
                         self.expansions_collision += 1
                     elif write_result.outcome == WriteOutcome.FAILED:
@@ -811,6 +820,8 @@ class SearchCoordinator:
             return
 
         self.descents_completed += 1
+        if self._reporter is not None:
+            self._reporter.record_descent()
 
         # Compute the leaf's side to move
         leaf_stm_is_white = side_to_move_is_white(current_key)
