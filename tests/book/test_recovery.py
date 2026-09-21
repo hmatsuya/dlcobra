@@ -490,8 +490,9 @@ async def test_pg_terminate_backend_suspends_reconnects_and_resumes(
         assert await store._run(one_statement) == 1
 
         # Terminate every scratch backend, including the pool's, then issue
-        # a statement. asyncpg surfaces the loss as ConnectionDoesNotExist
-        # Error / ConnectionResetError, which `_run` catches, suspends on,
+        # a statement. asyncpg surfaces the loss as
+        # ConnectionDoesNotExistError / ConnectionResetError / the mid-query
+        # InternalClientError, which `_run` catches, suspends on,
         # reconnects for real (the scratch DB is still alive), and re-raises.
         await _terminate_scratch_backends(pg_scratch_database)
 
@@ -502,6 +503,7 @@ async def test_pg_terminate_backend_suspends_reconnects_and_resumes(
             asyncpg.exceptions.ConnectionDoesNotExistError,
             ConnectionResetError,
             asyncpg.exceptions.InterfaceError,
+            asyncpg.exceptions.InternalClientError,
         ):
             seam_tripped = True
 

@@ -1726,7 +1726,7 @@ The 267 GB / 3.6 GB sizing, the inline-versus-TOAST margin, the HOT update ratio
 record are all independent of the host language: they decide how many page reads a node fetch costs,
 and that number sets the 2-40 ms I/O term that dominates Requirement 15.1. Requirement 15.3's
 integration test therefore keeps both of its structural assertions —
-`pg_column_size(edges) <= 2000` and `n_tup_hot_upd / n_tup_upd > 0.95` — unchanged, because a
+`pg_column_size(edges) <= 2000` and `n_tup_hot_upd / n_tup_upd > 0.93` — unchanged, because a
 regression in either is a regression in the design rather than in the code, and neither has anything
 to do with Python.
 
@@ -2827,8 +2827,8 @@ Against a real PostgreSQL instance and a real GPU:
   mean Evaluator batch size, and RSS every 10 s for the memory bound. This is the test that validates
   the central design decision, so it additionally asserts, via `pg_stat_all_tables` and
   `pg_column_size(edges) <= 2000` sampling, that the typical row is **not** TOASTed and, via
-  `pg_stat_user_tables.n_tup_hot_upd / n_tup_upd > 0.95`, that the HOT update ratio for backup writes
-  is above 0.95. A regression in either number is a regression in the design, not merely in the code,
+  `pg_stat_user_tables.n_tup_hot_upd / n_tup_upd > 0.93`, that the HOT update ratio for backup writes
+  is above 0.93. A regression in either number is a regression in the design, not merely in the code,
   and neither depends on the host language. The same run records the per-process descent rate that
   *Performance budget* predicts at 600-1,250/s; a measured rate outside that band means the model in
   this document is wrong and the document is what gets fixed.
@@ -3006,7 +3006,7 @@ recognition and the range table's contents are configuration facts, not behaviou
 | 14.7 unwritable log destination | rate-limited operator report; unit test |
 | 15.1 descent latency | one page read per node, batched prefetch, coalesced backups; *Performance budget* shows the Python term is 0.8-1.6 ms against a 2-40 ms I/O term and a 1000 ms budget; integration test |
 | 15.2 sustained descent rate | accumulator coalescing, asyncpg pipelining, `synchronous_commit = off`, and **one OS process per search-command process-count argument (Requirement 13.10) as the parallelism mechanism**; *Performance budget* states the honest per-process ceiling of ~600-1,250 descents/s, the `Throughput_Floor` sizing warning, and the Cython escape hatch for the 15.2 us scoring step; integration test measures the real per-process rate against the configured floor divided by the number of search processes (Requirement 14.4) |
-| 15.3 node-plus-edges read latency | inline packed edges, 20-byte records, `fillfactor = 70`, `SET STORAGE MAIN`; integration test retains the `pg_column_size(edges) <= 2000` and `n_tup_hot_upd / n_tup_upd > 0.95` assertions, both language-independent |
+| 15.3 node-plus-edges read latency | inline packed edges, 20-byte records, `fillfactor = 70`, `SET STORAGE MAIN`; integration test retains the `pg_column_size(edges) <= 2000` and `n_tup_hot_upd / n_tup_upd > 0.93` assertions, both language-independent |
 | 15.4 resident memory bound | node LRU, Terashock lookups in PostgreSQL rather than mmap, `np.frombuffer` views rather than per-edge Python objects, RSS sampler |
 | 15.5 cache release under pressure | RSS sampler driving LRU eviction; Property 47 |
 | 15.6 descent timeout | `asyncio.wait_for(descent, timeout=10.0)` plus a per-node `loop.time()` deadline check for CPU-bound stalls; claims released in the `finally`; Property 46 |

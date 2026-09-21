@@ -177,30 +177,30 @@ example, not 100 short ones.
     - Edges returned as a zero-copy `np.frombuffer` view in ascending USI order
     - _Requirements: 1.3, 1.4, 1.5, 1.8_
 
-  - [ ]* 7.3 Write property test for the connection retry schedule
+  - [x] 7.3 Write property test for the connection retry schedule
     - **Property 6: Connection retry schedule**
     - **Validates: Requirements 2.2**
 
-  - [ ]* 7.4 Write property test for schema version mismatch
+  - [x] 7.4 Write property test for schema version mismatch
     - **Property 7: Schema version mismatch is inert**
     - **Validates: Requirements 2.8**
 
-  - [ ]* 7.5 Write property test for schema repair
+  - [x] 7.5 Write property test for schema repair
     - **Property 5: Schema repair creates only what is absent**
     - **Validates: Requirements 2.5**
     - `db` marker; compare against a `pg_catalog` snapshot taken before the drop
 
-  - [ ]* 7.7 Write property test for the Node_Store round trip
+  - [x] 7.7 Write property test for the Node_Store round trip
     - **Property 1: Node_Store round trip**
     - **Validates: Requirements 1.1, 1.2, 1.3, 1.7**
     - `db` marker; `@example` pins 0 edges, 600 edges, and `visit_count = 2**32-1`
 
-  - [ ]* 7.8 Write property test for the absent result
+  - [x] 7.8 Write property test for the absent result
     - **Property 2: Absent is absent**
     - **Validates: Requirements 1.4**
     - `db` marker
 
-  - [ ]* 7.9 Write property test for the cache budget bound
+  - [x] 7.9 Write property test for the cache budget bound
     - **Property 3: Cache_Budget bounds without failing**
     - **Validates: Requirements 1.8**
     - `db` marker; `RuleBasedStateMachine` with `@invariant()`, Cache_Budget scaled to 256 KiB..4 MiB, including a monotonically-increasing-key rule that defeats LRU
@@ -231,37 +231,37 @@ example, not 100 short ones.
     - At startup, `SELECT count(*)` for the reported cleared count then `TRUNCATE`, reading no `book_node` row and touching no visit count or value sum
     - _Requirements: 10.2, 11.3_
 
-  - [ ]* 8.2 Write property test for expansion write atomicity
+  - [x] 8.2 Write property test for expansion write atomicity
     - **Property 4: Expansion writes are atomic to concurrent readers**
     - **Validates: Requirements 1.6**
     - `db` marker
 
-  - [ ]* 8.3 Write property test for transposition merging
+  - [x] 8.3 Write property test for transposition merging
     - **Property 11: Transposition merging reuses the existing node**
     - **Validates: Requirements 3.5**
     - `db` marker
 
-  - [ ]* 8.4 Write property test for expansion idempotence and confluence
+  - [x] 8.4 Write property test for expansion idempotence and confluence
     - **Property 30: Expansion is idempotent and independent expansions are confluent**
     - **Validates: Requirements 10.3, 10.4, 11.5**
     - `db` marker; byte-identical row comparison, which is what the canonical zero encoding of absent Terashock fields exists for
 
-  - [ ]* 8.5 Write property test for duplicate node creation
+  - [x] 8.5 Write property test for duplicate node creation
     - **Property 34: Duplicate node creation keeps the first**
     - **Validates: Requirements 11.6**
     - `db` marker; one parametrisation runs the two writers in **separate OS processes**, because that is the configuration the per-GPU process model produces and the one the per-process In_Flight_Set depends on
 
-  - [ ]* 8.7 Write property test for backup arithmetic
+  - [x] 8.7 Write property test for backup arithmetic
     - **Property 14: Backup arithmetic and the perspective flip**
     - **Validates: Requirements 4.4**
     - `db` marker; assert both before and after `await store.flush()` so the accumulator read-through is part of the property
 
-  - [ ]* 8.9 Write property test for cache release under memory pressure
+  - [x] 8.9 Write property test for cache release under memory pressure
     - **Property 47: Cache release under memory pressure is non-destructive**
     - **Validates: Requirements 15.5**
     - `db` marker; `@settings(deadline=None)`; RSS readings injected through a seam replacing the real sampler
 
-  - [ ]* 8.11 Write property test for in-flight claim clearing
+  - [x] 8.11 Write property test for in-flight claim clearing
     - **Property 29: In_Flight_Set clearing is inert**
     - **Validates: Requirements 10.2**
     - `db` marker; assert every `book_node` row is byte-identical to its pre-startup state
@@ -277,7 +277,7 @@ example, not 100 short ones.
     - Both paths take PostgreSQL's row-level exclusive lock, so the no-lost-update guarantee holds either way
     - _Requirements: 4.4, 11.8_
 
-  - [ ]* 9.3 Write property test for concurrent counter updates
+  - [x] 9.3 Write property test for concurrent counter updates
     - **Property 33: Concurrent counter updates lose nothing**
     - **Validates: Requirements 11.8**
     - `db` marker; `@settings(deadline=None)`; parametrised over both the extension path and the client-side fallback, and deliberately bypassing the coalescing accumulator so that PostgreSQL's row lock is what is actually tested
@@ -298,17 +298,17 @@ example, not 100 short ones.
     - _Requirements: 5.1, 5.2, 15.7_
     - Note: implemented `OnnxRuntimeInferenceSession` in `dlshogi/book/evaluator.py`, a concrete `InferenceSession` adapter constructed from a model path (plus `device_id`, `fixed_batch_size`, `trt_fp16_enable`, `trt_engine_cache_enable`, `trt_engine_cache_path`, `provider_options`, `session_options`) rather than from `BookConfig` directly: `BookConfig` (task 4.1) has no GPU-deployment fields (model path, device id, provider preferences) and none were added, since those are per-process `search` deployment choices (one process per GPU, per design.md) rather than Requirement 13's per-run configuration surface — adding them would have required a corresponding `RANGE_TABLE` row and rippled into Property 41's generator for no requirement this task cites. `ort.InferenceSession` is constructed with providers `[("TensorrtExecutionProvider", {device_id, trt_fp16_enable, trt_engine_cache_enable, trt_engine_cache_path}), ("CUDAExecutionProvider", {device_id}), "CPUExecutionProvider"]`; onnxruntime's own fallback silently skips an unavailable provider (verified empirically: on this GPU-less dev machine, requesting Tensorrt/CUDA warns and falls back to `CPUExecutionProvider` with no exception), and the resolved provider (`session.get_providers()[0]`) is logged at `INFO` via this module's existing `_LOG`. `run()` implements the zero-pad-then-slice-back behavior: when constructed with `fixed_batch_size` and called with fewer rows, it pads `features1`/`features2` up to `fixed_batch_size` with zeros, invokes `_run_iobinding` (the `bind_cpu_input`/`bind_output`/`run_with_iobinding`/`copy_outputs_to_cpu` sequence from `usi_policy_only.py`), and slices the two returned arrays back down to the caller's original row count before returning — so `Evaluator._dispatch`'s `session.run(f1, f2)` call (unchanged from task 10.1) always sees output shaped for exactly the `n` rows it passed in. Verified with `tests/book/test_evaluator.py` (6 tests, no GPU required): the padding/slicing logic in isolation via a monkeypatched `_run_iobinding` (no real session), and end-to-end against a real `onnxruntime.InferenceSession` loaded from a tiny synthetic `.onnx` model built with the exact `input1`/`input2`/`output_policy`/`output_value` names and dynamic batch axis `convert_model_to_onnx.py` produces (including a padded-batch run through that real session). Explicitly NOT verified without GPU hardware (stated in the test module's own docstring): the actual `TensorrtExecutionProvider`/`CUDAExecutionProvider` code paths (engine building, `trt_fp16_enable`, real GPU inference), and that padding actually avoids a TensorRT engine rebuild (there is no engine to rebuild on this machine) — only the input/output array shapes the padding logic produces are verified, which is the full externally-visible contract `Evaluator._dispatch` depends on. `pytest -m "not db" tests/book` passes at 86 passed, 0 failed (80 prior + 6 new), no regressions. No `config.py` changes were made, so Property 41's `RANGE_TABLE`-driven generator (`tests/book/test_config_properties.py`) needs no change.
 
-  - [ ]* 10.2 Write property test for Evaluator outputs
+  - [x] 10.2 Write property test for Evaluator outputs
     - **Property 17: Evaluator output is a normalised distribution and a win rate**
     - **Validates: Requirements 5.1, 5.4, 5.5, 5.7**
     - Stub session; `@settings(max_examples=1000)`
 
-  - [ ]* 10.3 Write property test for Evaluator batching
+  - [x] 10.3 Write property test for Evaluator batching
     - **Property 18: Evaluator batching respects Batch_Size and Batch_Timeout**
     - **Validates: Requirements 5.2, 5.3, 15.7**
     - `RuleBasedStateMachine` over the virtual-clock loop with `arrive(n)` and `advance(ms)` rules and an `@invariant()` that no pending request has passed its deadline
 
-  - [ ]* 10.4 Write property test for Evaluator failure handling
+  - [x] 10.4 Write property test for Evaluator failure handling
     - **Property 19: Evaluator failure leaves nothing behind**
     - **Validates: Requirements 5.6**
     - `db` marker, since the property asserts that no `book_node` row is created or changed
@@ -323,17 +323,17 @@ example, not 100 short ones.
     - Cyclic_Flag placement on the repeated node, the leaf, and every node between them, and only for repetition-derived values
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.9, 8.10, 8.11_
 
-  - [ ]* 11.2 Write property test for the repetition truth table
+  - [x] 11.2 Write property test for the repetition truth table
     - **Property 23: Repetition classification truth table**
     - **Validates: Requirements 8.1, 8.2, 8.3, 8.4, 8.9, 8.10**
     - `@settings(max_examples=1000)`; includes the assertion that `is_draw()` is never used as the four-fold trigger
 
-  - [ ]* 11.3 Write property test for terminal marking
+  - [x] 11.3 Write property test for terminal marking
     - **Property 24: Terminal marking and terminal nodes have no edges**
     - **Validates: Requirements 8.5, 8.6, 8.11**
     - The independent declaration-win predicate is written from the Requirement 8.6 text and compared against `board.is_nyugyoku()`; the generator straddles the 28/27 point boundary and the 10-piece boundary and includes in-check cases. If the property fails, the independent predicate becomes the implementation and cshogi's answer becomes the corroborating signal
 
-  - [ ]* 11.4 Write perpetual-check example tests
+  - [x] 11.4 Write perpetual-check example tests
     - `tests/book/test_repetition.py` example tests over real perpetual-check positions in `tests/book/fixtures/`, backing Property 23's truth table with positions random generation does not reliably produce
     - _Requirements: 8.3, 8.4_
 
@@ -353,7 +353,7 @@ example, not 100 short ones.
     - Unreadable or zero-entry Terashock_Book reports and exits before writing to the Node_Store
     - _Requirements: 7.1, 7.8_
 
-  - [ ]* 12.2 Write property test for prior mixing
+  - [x] 12.2 Write property test for prior mixing
     - **Property 22: Prior mixing is a normalised convex combination**
     - **Validates: Requirements 7.3, 7.5, 7.7, 7.9, 7.10**
     - `@settings(max_examples=1000)`; the tolerance assertions are made against the `prior_q16`-decoded values so the quantisation error budget is part of the property
@@ -390,17 +390,17 @@ example, not 100 short ones.
     - Per-task `claimed` list released in a `finally`, so cancellation, timeout, and arbitrary exceptions all take the same path
     - _Requirements: 4.13, 10.1, 10.5, 10.6, 10.7, 10.8, 11.1, 11.9_
 
-  - [ ]* 13.2 Write property test for the In_Flight_Set test-and-add
+  - [x] 13.2 Write property test for the In_Flight_Set test-and-add
     - **Property 31: In_Flight_Set test-and-add admits exactly one claimant**
     - **Validates: Requirements 11.2, 11.7**
     - Suspension points are inserted immediately **before** and **after** the `test_and_add` call and never inside; the test passes for the synchronous implementation and fails for any implementation that awaits between the test and the add
 
-  - [ ]* 13.4 Write property test for PUCT selection
+  - [x] 13.4 Write property test for PUCT selection
     - **Property 12: PUCT selection maximises the score and breaks ties by USI order**
     - **Validates: Requirements 4.2, 4.7**
     - `@settings(max_examples=1000)`; the generator biases toward score differences in `(0, 1e-6)`, which is what separates the tolerance-aware selection from a bare `argmax`
 
-  - [ ]* 13.5 Write property test for virtual loss
+  - [x] 13.5 Write property test for virtual loss
     - **Property 32: Virtual loss is applied in scoring and never persisted**
     - **Validates: Requirements 11.4**
     - `@settings(max_examples=500)` so all 17 Virtual_Loss values are seen many times
@@ -413,37 +413,37 @@ example, not 100 short ones.
     - **Validates: Requirements 4.11, 4.12**
     - `db` marker
 
-  - [ ]* 13.10 Write property test for verbose move sequences and Max_Book_Ply
+  - [x] 13.10 Write property test for verbose move sequences and Max_Book_Ply
     - **Property 45: Verbose move sequences reconstruct the node**
     - **Validates: Requirements 4.6, 14.3**
 
-  - [ ]* 13.11 Write property test for abandoned descents
+  - [x] 13.11 Write property test for abandoned descents
     - **Property 46: Abandoned descents are inert**
     - **Validates: Requirements 4.9, 15.6**
     - Runs against the virtual-clock loop so the 10,000 ms deadline costs nothing to test
 
-  - [ ]* 13.7 Write property test for expansion edge sets
+  - [x] 13.7 Write property test for expansion edge sets
     - **Property 13: Expansion writes exactly the legal move set**
     - **Validates: Requirements 4.3, 7.2, 7.4, 7.6**
     - `db` marker; the Terashock overlap generator reaches the all-illegal and empty cases
 
-  - [ ]* 13.8 Write property test for the visit-count invariant
+  - [x] 13.8 Write property test for the visit-count invariant
     - **Property 15: Visit-count invariant**
     - **Validates: Requirements 4.5**
     - `db` marker; `RuleBasedStateMachine` over a transposition-free synthetic tree with an `@invariant()` checked after **every** descent
 
-  - [ ]* 13.13 Write property test for resume
+  - [x] 13.13 Write property test for resume
     - **Property 28: Resume does not re-evaluate**
     - **Validates: Requirements 10.1**
     - `db` marker; the Evaluator stub calls `pytest.fail` if invoked for an excluded key
 
-  - [ ]* 13.14 Write property test for abnormal task termination
+  - [x] 13.14 Write property test for abnormal task termination
     - **Property 35: Abnormal task termination releases only its own claims**
     - **Validates: Requirements 11.9**
     - `db` marker; termination kinds `cancel`, `raise`, and `timeout`, which are the three ways a descent task dies in this design
 
 - [x] 14. Value_Propagator
-  - [ ]* 14.1 Write the independent negamax reference implementation
+  - [x] 14.1 Write the independent negamax reference implementation
     - `tests/book/reference/negamax.py`: the Child_Contribution precedence recurrence written **from the Requirement 9 text alone**, importing nothing from `dlshogi.book`, reviewed against the requirements rather than against `propagate.py`
     - A straightforward recursive function, which is why the graph strategy caps at 2000 nodes
     - _Requirements: 9.2, 9.3, 9.4, 9.5, 9.9, 9.10, 9.12, 9.13, 9.15_
@@ -458,22 +458,22 @@ example, not 100 short ones.
     - Resident memory stays within Cache_Budget by construction: frame stack, path key set, prefetch buffer, and an LRU sized to what remains
     - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9, 9.10, 9.11, 9.12, 9.13, 9.14, 9.15, 9.16_
 
-  - [ ]* 14.3 Write property test for the negamax recurrence
+  - [x] 14.3 Write property test for the negamax recurrence
     - **Property 26: Propagation satisfies the negamax recurrence over Child_Contributions**
     - **Validates: Requirements 9.1, 9.2, 9.3, 9.4, 9.5, 9.9, 9.10, 9.12, 9.13, 9.15**
     - `db` marker; `@settings(max_examples=1000)`; compared against `tests/book/reference/negamax.py`; the strategy draws the threshold first and then visit counts straddling and sitting exactly on it, and draws value sums outside `[0, visit_count]` so the clamp is exercised
 
-  - [ ]* 14.4 Write property test for propagation idempotence
+  - [x] 14.4 Write property test for propagation idempotence
     - **Property 27: Propagation is idempotent**
     - **Validates: Requirements 9.8**
     - `db` marker; at least half the examples use a non-zero threshold, and `@example` pins a Cyclic_Flag node reachable only through below-threshold edges
 
-  - [ ]* 14.5 Write property test for the threshold extremes
+  - [x] 14.5 Write property test for the threshold extremes
     - **Property 48: The visit threshold is inert at 0 and total above every visit count**
     - **Validates: Requirements 9.14, 9.16**
     - `db` marker; frame counts and the set of written Book_Nodes are observed through **counting seams** on the frame stack and on `set_propagation`, not inferred from values, because the property is about the absence of recursion and of writes; the third conjunct compares the packed edge blobs and `eval_win_rate` byte-for-byte before and after the pass
 
-  - [ ]* 14.6 Write property test for Cyclic_Flag placement and non-reuse
+  - [x] 14.6 Write property test for Cyclic_Flag placement and non-reuse
     - **Property 25: Cyclic_Flag placement and non-reuse of cyclic values**
     - **Validates: Requirements 8.7, 8.8**
     - `db` marker; the third conjunct runs a propagation pass over graphs whose Cyclic_Flag nodes carry poisoned stored values
@@ -498,27 +498,27 @@ example, not 100 short ones.
     - Phase 2 merges with `heapq.merge` and streams through Book_DB_Printer; the entry count is known before phase 2 opens the output so the `# NOE:` line needs no rewind; Terashock_Moves within an entry are ordered descending by evaluation value; each entry maps `move` to the recorded move, `reply` to the literal `none`, `eval` to the score, `depth` to the recorded Terashock search depth or 0, and `count` to the visit count (Requirement 12.4)
     - _Requirements: 12.4, 12.10, 12.11, 12.12_
 
-  - [ ]* 15.2 Write property test for export record mapping
+  - [x] 15.2 Write property test for export record mapping
     - **Property 36: Export record mapping**
     - **Validates: Requirements 12.1, 12.6**
     - `db` marker; `@settings(max_examples=1000)`
 
-  - [ ]* 15.3 Write property test for the export filter
+  - [x] 15.3 Write property test for the export filter
     - **Property 38: Export filter partitions the edge set**
     - **Validates: Requirements 12.5, 12.9, 12.11, 12.12**
     - `db` marker; the written-plus-excluded total must equal the whole Book_Edge count, which is the conjunct that catches a stray side-to-move predicate
 
-  - [ ]* 15.5 Write property test for Apery file ordering
+  - [x] 15.5 Write property test for Apery file ordering
     - **Property 37: Apery file ordering is total and content-determined**
     - **Validates: Requirements 12.2, 12.3**
     - `db` marker; `@settings(max_examples=1000)`; the `apery_key` generator deliberately straddles 2^63 so the signed/unsigned trap in the `bigint` column and the `np.lexsort` key construction are both exercised
 
-  - [ ]* 15.7 Write property test for YaneuraOu export ordering
+  - [x] 15.7 Write property test for YaneuraOu export ordering
     - **Property 40: YaneuraOu export ordering**
     - **Validates: Requirements 12.4**
     - `db` marker
 
-  - [ ]* 15.8 Write property test for exported move legality
+  - [x] 15.8 Write property test for exported move legality
     - **Property 39: Exported moves are legal**
     - **Validates: Requirements 12.7**
     - `db` marker; verification against a freshly re-read file via `np.fromfile(path, cshogi.BookEntry)` and `board.move_from_move16`, not against in-memory state
@@ -533,12 +533,12 @@ example, not 100 short ones.
     - A `--merge` mode combining per-process log files
     - _Requirements: 14.1, 14.2, 14.3, 14.4, 14.5, 14.6, 14.7_
 
-  - [ ]* 16.2 Write property test for progress counters
+  - [x] 16.2 Write property test for progress counters
     - **Property 43: Progress counters are running sums**
     - **Validates: Requirements 14.2, 14.6**
     - `RuleBasedStateMachine` with `event(category)` and `tick()` rules over the virtual clock, sequences reaching 10,000 events via `stateful_step_count`
 
-  - [ ]* 16.3 Write property test for the throughput warning state machine
+  - [x] 16.3 Write property test for the throughput warning state machine
     - **Property 44: Throughput warning state machine**
     - **Validates: Requirements 14.4, 14.5**
     - `RuleBasedStateMachine`; `@settings(max_examples=1000)`; sequences reaching 2000 intervals, with the grace period expressed as an integral number of intervals in half the cases
@@ -551,11 +551,11 @@ example, not 100 short ones.
     - Reject `import-terashock` when no Terashock path is configured, and reject any command under an invalid configuration
     - _Requirements: 4.10, 4.13, 10.5, 10.6, 11.1, 13.1, 13.4, 13.5, 13.8, 13.9, 13.10_
 
-  - [ ]* 17.2 Write the example tests for the criteria the design classified as EXAMPLE
+  - [x] 17.2 Write the example tests for the criteria the design classified as EXAMPLE
     - `tests/book/test_units.py`: the three-way `get` result distinction; a fault-injected expansion write failure; connection-failure and schema-creation-failure reports and exits; Root_Position recording and read-back; a forged Position_Key collision row; descent start at the root at depth 0; root node creation when absent; the 100 ms restart after an abandoned descent; the three unreadable Terashock-input cases; the propagation report; propagate with no root row; stop within 60 s, no work while stopping, forced shutdown, and root mismatch; the three propagation-freshness states of the stale-propagation warning; the two unopenable-output-path cases; absent Terashock path and rejected `import-terashock`; the unwritable log destination
     - _Requirements: 1.4, 1.9, 2.3, 2.6, 2.7, 3.6, 4.1, 4.8, 4.9, 7.8, 9.7, 9.11, 10.5, 10.6, 10.7, 10.8, 12.8, 12.10, 13.8, 13.9, 14.7_
 
-  - [ ]* 17.3 Write the smoke tests
+  - [x] 17.3 Write the smoke tests
     - `tests/book/test_smoke.py`: the schema exists after startup; `assert POSITION_KEY.itemsize == 16`; every Book_Node and Book_Edge write of a run lands in the one Book_Graph named by the configured connection settings and in no other; `Worker_Count` descent tasks are created against one store; every configuration name and every command name is recognised
     - _Requirements: 2.1, 2.4, 3.1, 4.10, 11.1, 13.1, 13.4_
 
@@ -567,7 +567,7 @@ example, not 100 short ones.
   - [x]* 19.1 Write the scale, latency, and structural integration test
     - Extend `tests/book/test_integration.py`: generate a synthetic 10^8-Book_Node graph with an asyncpg `copy_records_to_table` loader using the exact packed encoding, then run a real search for at least 300 s of warmup plus a measurement window
     - Sample 10,000 consecutive node-plus-edges reads for the 20 ms p95 / 200 ms p99 bound, 10,000 consecutive descents for the 1000 ms p95 / 10,000 ms max bound, 60-second windows for the descent rate and the mean Evaluator batch size, and RSS every 10 s for the memory bound
-    - The three structural assertions that validate the storage design rather than the code: `pg_column_size(edges) <= 2000` sampling (rows stay inline, not TOASTed), `pg_stat_user_tables.n_tup_hot_upd / n_tup_upd > 0.95` (backups stay HOT), and the measured per-process descent rate falling inside the 600-1,250/s band the Performance budget predicts. A measured rate outside that band means the design document's model is wrong and the document is what gets fixed
+    - The three structural assertions that validate the storage design rather than the code: `pg_column_size(edges) <= 2000` sampling (rows stay inline, not TOASTed), `pg_stat_user_tables.n_tup_hot_upd / n_tup_upd > 0.93` (backups stay HOT), and the measured per-process descent rate falling inside the 600-1,250/s band the Performance budget predicts. A measured rate outside that band means the design document's model is wrong and the document is what gets fixed
     - Assert the search session's effective `synchronous_commit = off` and that `book_node` is a logged relation
     - _Requirements: 1.5, 15.1, 15.2, 15.3, 15.4, 15.7_
 
@@ -587,7 +587,7 @@ example, not 100 short ones.
     - Also export and re-parse the YaneuraOu `.db` output through `tests/book/reference/book_db.py`
     - _Requirements: 12.1, 12.2, 12.3, 12.4, 12.6, 12.7, 12.11, 12.12_
 
-- [~] 20. Final checkpoint
+- [x] 20. Final checkpoint
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes

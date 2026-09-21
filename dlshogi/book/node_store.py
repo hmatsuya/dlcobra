@@ -95,6 +95,11 @@ _SCHEMA_CREATION_TIMEOUT_S = 300.0
 # to this many seconds.
 _CONNECT_ATTEMPT_TIMEOUT_S = 5.0
 
+# Bounded close (see `NodeStore.close`): a backend killed mid-query leaves
+# its asyncpg 0.30 connection holder unreleased, so an unbounded
+# `Pool.close()` would hang the reconnect seam forever; this caps it.
+_CLOSE_TIMEOUT_S = 10.0
+
 # Requirement 2.2: wait 1 second before the first retry, doubling before
 # each subsequent retry, up to this maximum wait per retry.
 _RETRY_INITIAL_WAIT_S = 1.0
@@ -918,11 +923,36 @@ class NodeStore:
         )
         await conn.close()
 
-    async def close(self) -> None:
-        """Close the pool. Safe to call even if `connect` was never called."""
-        if self._pool is not None:
-            await self._pool.close()
+    async def close(self, force: bool = False) -> None:
+        """Close the pool. Safe to call even if `connect` was never called.
+
+        Bounded by `_CLOSE_TIMEOUT_S`: a backend killed mid-query leaves its
+        asyncpg 0.30 connection holder unreleased, so an unbounded
+        ``Pool.close()`` would block forever and hang any caller awaiting the
+        close. On timeout we force-``terminate()`` (closes the sockets
+        without waiting) instead of hanging.
+
+        ``force=True`` skips the graceful close and terminates the pool
+        immediately. The reconnect seam (``_handle_connection_lost``) uses it
+        because it already knows the pool is broken and a graceful close
+        would just spend the whole timeout on the dead connection's
+        unreleased holder before reconnecting.
+        """
+        if self._pool is None:
+            return
+        if force:
+            self._pool.terminate()
             self._pool = None
+            return
+        try:
+            await asyncio.wait_for(self._pool.close(), timeout=_CLOSE_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            _LOG.warning(
+                "Node_Store pool close timed out after %ss; force-terminating",
+                _CLOSE_TIMEOUT_S,
+            )
+            self._pool.terminate()
+        self._pool = None
 
     @property
     def pool(self) -> asyncpg.Pool:
@@ -1182,8 +1212,10 @@ class NodeStore:
     #     "Descent tasks acquire a connection for the duration of a
     #     single statement, not for the duration of a descent."
     #   - On success, the result is returned unchanged.
-    #   - On `asyncpg.exceptions.ConnectionDoesNotExistError` or
-    #     `ConnectionResetError`, `suspended` is cleared (so every other
+    #   - On a connection-lost exception (`asyncpg.exceptions.
+    #     ConnectionDoesNotExistError`, `ConnectionResetError`, or the
+    #     mid-query `InternalClientError` asyncpg 0.30 raises after a
+    #     backend is killed), `suspended` is cleared (so every other
     #     caller that awaits `suspended.wait()` blocks), a reconnect loop
     #     runs using the same `retry_schedule`/attempt-timeout logic as
     #     `connect`, and:
@@ -1206,10 +1238,17 @@ class NodeStore:
     # does not block new callers that arrive while a reconnect is already
     # in progress -- it lets `asyncio.Lock` do that serialization instead.
 
-    _CONNECTION_LOST_EXCEPTIONS = (asyncpg.exceptions.ConnectionDoesNotExistError, ConnectionResetError)
+    _CONNECTION_LOST_EXCEPTIONS = (
+        asyncpg.exceptions.ConnectionDoesNotExistError,
+        ConnectionResetError,
+        # asyncpg 0.30 surfaces a mid-query `pg_terminate_backend` as this
+        # (the protocol is mid-command, so it is *not* a subclass of the
+        # other two); without it the seam never fires on that failure mode.
+        asyncpg.exceptions.InternalClientError,
+    )
 
     async def _run(self, fn: Callable[[asyncpg.Pool], Awaitable[_T]]) -> _T:
-        """Run ``fn(self.pool)``, catching the two connection-lost exceptions.
+        """Run ``fn(self.pool)``, catching the connection-lost exceptions.
 
         See the section comment above for the full contract. This is the
         one seam this module and every later read/write method built on
@@ -1239,7 +1278,11 @@ class NodeStore:
                 "Node_Store lost its PostgreSQL connection (%r); suspending "
                 "reads and writes and attempting to reconnect", exc,
             )
-            await self.close()
+            # The pool is known-broken here; force-terminate it instead of a
+            # graceful close, which would spend the whole _CLOSE_TIMEOUT_S on
+            # the dead connection's unreleased holder before we could
+            # reconnect (see `close`'s `force` path).
+            await self.close(force=True)
             try:
                 await self.connect()
             except NodeStoreConnectionError:
