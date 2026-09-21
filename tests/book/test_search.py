@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import random
+import sys
+from pathlib import Path
 
 import cshogi
 import numpy as np
@@ -26,6 +29,10 @@ from dlshogi.book.keys import PositionKey
 from dlshogi.book.packed_edge import PACKED_EDGE
 from dlshogi.book.prior_mixer import win_rate
 from dlshogi.book.search import InFlightSet, select_edge
+
+# The Property 16 colour-swap fixture lives in a sibling ``fixtures`` package.
+sys.path.insert(0, str(Path(__file__).resolve().parent / "fixtures"))
+import colour_swap  # noqa: E402
 
 # Flag bit-0 in PACKED_EDGE["flags"]: Terashock evaluation present.
 _FLAG_TERASHOCK_PRESENT = 0x01
@@ -765,44 +772,73 @@ class TestProperty15VisitCountInvariant:
 class TestProperty16DescentColourBlind:
     """Property 16: Descent is colour-blind.
 
-    **Validates: Requirements 4.3**
+    **Validates: Requirements 4.11 (descent reads no side), 4.12 (colour-
+    independence of selection).**
 
-    The PUCT selection does not depend on the side to move — the same
-    edge array and parameters yield the same selection regardless of
-    which colour is to move.
+    Metamorphic property: for a node's USI-ordered edge buffer, building the
+    same buffer (same Q / visit / prior) from the 180-degree colour-swapped
+    image of the position and running ``select_edge`` on both, the selected
+    edge on the image is exactly the rotated version of the edge selected on
+    the original. ``select_edge`` reads only the side-independent decision
+    fields, so the two selections are linked purely by move geometry.
     """
 
-    @pytest.mark.db
-    @pytest.mark.asyncio
-    async def test_same_selection_regardless_of_colour(self, pg_scratch_database, pg_conn, truncate_and_repopulate):
-        """select_edge produces the same result for black and white to move."""
-        await truncate_and_repopulate()
+    # Fixed seed exposed as a named constant (design: colour-blindness
+    # generators share a fixed, named seed).
+    seed = 1234
 
-        # Create an edge array
-        edges = np.zeros(3, dtype=PACKED_EDGE)
+    def _edges_for(self, moves, q_values):
+        """Build a PACKED_EDGE array from move16s + Q values, USI-sorted."""
+        items = sorted(zip(moves, q_values), key=lambda t: cshogi.move_to_usi(t[0]))
+        edges = np.zeros(len(items), dtype=PACKED_EDGE)
+        for i, (m16, q) in enumerate(items):
+            edges[i]["move16"] = m16
+            edges[i]["prior_q16"] = 24576
+            edges[i]["visit_count"] = 5
+            edges[i]["value_sum"] = q * 5.0
+        return edges
+
+    def test_same_selection_regardless_of_colour(self):
+        """select_edge's choice on a position is the rotated choice on its
+        colour-swapped image."""
+        rng = random.Random(self.seed)
         board = cshogi.Board()
-        moves = sorted(board.legal_moves, key=lambda m: cshogi.move_to_usi(cshogi.move16(m)))[:3]
-        for i, m in enumerate(moves):
-            edges[i]["move16"] = cshogi.move16(m)
-            edges[i]["prior_q16"] = 10000 + i * 5000
-            edges[i]["visit_count"] = 10 + i * 5
-            edges[i]["value_sum"] = 5.0 + i * 2.0
+        cases = 0
+        for _ in range(240):
+            sfen = board.sfen()
+            if not board.is_ok():
+                break
+            # Fixture self-consistency: the legal-move set maps onto its image.
+            assert colour_swap.legal_moves_correspond(sfen)
 
-        in_flight_mask = np.zeros(3, dtype=np.bool_)
-        excluded_mask = np.zeros(3, dtype=np.bool_)
+            moves = list(board.legal_moves)
+            if not moves:
+                break
+            m16s = [cshogi.move16(m) for m in moves]
+            # Distinct Q values -> a unique argmax, independent of edge order.
+            q_values = [0.02 * (i + 1) for i in range(len(m16s))]
+            n = len(m16s)
 
-        # The PUCT formula does not use side-to-move at all
-        result = select_edge(
-            edges, 30, 1.41, 0, in_flight_mask, excluded_mask, 600.0
-        )
+            orig = self._edges_for(m16s, q_values)
+            rotated = self._edges_for(
+                [colour_swap.rotate_move16(m) for m in m16s], q_values
+            )
+            in_flight = np.zeros(n, dtype=np.int64)
+            excluded = np.zeros(n, dtype=np.uint8)
 
-        # Same parameters => same result (colour-blind)
-        result2 = select_edge(
-            edges, 30, 1.41, 0, in_flight_mask, excluded_mask, 600.0
-        )
-
-        assert result == result2
-        assert result is not None
+            r = select_edge(orig, n, 1.41, 0, in_flight, excluded, 600.0)
+            r2 = select_edge(rotated, n, 1.41, 0, in_flight, excluded, 600.0)
+            assert r is not None and r2 is not None
+            sel_orig = int(orig[r]["move16"])
+            sel_rot = int(rotated[r2]["move16"])
+            assert colour_swap.rotate_move16(sel_orig) == sel_rot, (
+                f"colour-blindness violated at {sfen}: "
+                f"orig_sel={cshogi.move_to_usi(sel_orig)} "
+                f"rot_sel={cshogi.move_to_usi(sel_rot)}"
+            )
+            cases += 1
+            board.push_usi(cshogi.move_to_usi(rng.choice(moves)))
+        assert cases >= 200, f"only {cases} positions walked (expected >= 200)"
 
 
 # ---------------------------------------------------------------------------

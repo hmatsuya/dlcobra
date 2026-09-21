@@ -405,13 +405,14 @@ example, not 100 short ones.
     - **Validates: Requirements 11.4**
     - `@settings(max_examples=500)` so all 17 Virtual_Loss values are seen many times
 
-  - [ ]* 13.9 Write the colour-swap fixture and the colour-blindness property test
+  - [x] 13.9 Write the colour-swap fixture and the colour-blindness property test
     - `tests/book/fixtures/colour_swap.py`: the purely textual SFEN transform (reverse rank and file order of the board field, invert piece-letter case, exchange `b`/`w`, swap the hand-field case groups) and the USI move transform (`f -> 10 - f`, `r -> 'j' - r`, `+` and drop prefixes untouched), with the involution check `swap(swap(x)) == x` asserted for every drawn SFEN and move plus `board.is_ok()` on every swapped position
     - The transform re-sorts each node's edges into ascending USI order and carries every per-edge field with its edge; the mock Evaluator is keyed by the **pre-swap** Position_Key
     - Both documented generator preconditions: reject positions whose side to move has its king inside the opponent's three ranks (the 28/27 declaration-win asymmetry), and draw priors and value sums so the PUCT argmax at every visited node is unique by more than the 1e-6 tolerance, asserting that margin as a generator postcondition
     - **Property 16: Descent is colour-blind**
     - **Validates: Requirements 4.11, 4.12**
     - `db` marker
+    - Implemented via `cshogi.rotate_sfen` / `cshogi.move_rotate` (the canonical 180° board rotation: mirrors the board, flips every piece's side, exchanges the hands, swaps the turn) rather than a hand-rolled textual transform, which breaks on `+`-promoted notation; the fixture self-check (40-position seeded walk) asserts the legal-move-set correspondence and the transform's involution. The Property 16 test is `TestProperty16DescentColourBlind::test_same_selection_regardless_of_colour` in `tests/book/test_search.py`: a seeded 240-position metamorphic walk asserting `select_edge` on a position's USI-ordered buffer and on its colour-swapped image pick USI-corresponding (i.e. `move_rotate`) edges.
 
   - [x] 13.10 Write property test for verbose move sequences and Max_Book_Ply
     - **Property 45: Verbose move sequences reconstruct the node**
