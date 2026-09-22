@@ -136,19 +136,19 @@ All ranges are inclusive. "required" = must be present (only
 
 ```bash
 # grow the book graph with PUCT search (spawns --gpu-count GPU worker processes)
-python -m dlshogi.book search --config book.yaml --model path/to/model.onnx --gpu-count 2
+python -m dlshogi.book search --config config.yaml --model path/to/model.onnx --gpu-count 2
 
 # run the negamax value-propagation pass
-python -m dlshogi.book propagate --config book.yaml
+python -m dlshogi.book propagate --config config.yaml
 
 # export to Apery and/or YaneuraOu
-python -m dlshogi.book export --config book.yaml --apery book.ap --yaneuraou book.db
+python -m dlshogi.book export --config config.yaml --apery book.ap --yaneuraou book.db
 ```
 
 Optionally seed from an existing YaneuraOu Terashock book before `search`:
 
 ```bash
-python -m dlshogi.book import-terashock --config book.yaml
+python -m dlshogi.book import-terashock --config config.yaml
 ```
 
 `search` is the only GPU-bound step (keep `--gpu-count` at or below your GPU

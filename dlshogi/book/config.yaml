@@ -1,0 +1,28 @@
+# PUCT Book Builder — CPU proof-of-concept config (exp036 model).
+# PostgreSQL keys use spaces (the schema's canonical names); port is a string.
+# Points at the PG16 cluster (port 5433) which has the puct_edge extension.
+"PostgreSQL host": "127.0.0.1"
+"PostgreSQL port": "5433"
+"PostgreSQL user": "hmatsuya"
+"PostgreSQL password": "puct_pw_2026"
+"PostgreSQL database": "puct_book"
+
+Cache_Budget: 268435456            # 256 MiB (minimum)
+Worker_Count: 8
+Batch_Size: 8
+Batch_Timeout: 200                 # ms
+Throughput_Floor: 25
+Throughput_Grace_Period: 600
+Virtual_Loss: 3
+Terashock_Prior_Weight: 0.5
+Eval_Coef: 600
+Draw_Value_Black: 0.5
+Draw_Value_White: 0.5
+Max_Book_Ply: 128
+Propagation_Visit_Threshold: 30
+Export_Visit_Threshold: 0.0
+Connection_Retry_Limit: 5
+Root_Position: "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1"
+Report_Interval: 30
+# 100T shock book (YaneuraOu BOOK-100T-Shock) as prior.
+"Terashock_Book path": "/home/hmatsuya/workspace/Shogi/data/terashock/user_book1.db"
