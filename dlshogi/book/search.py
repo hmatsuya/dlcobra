@@ -34,6 +34,7 @@ import numpy as np
 from dlshogi.book.config import BookConfig
 from dlshogi.book.evaluator import Evaluator, EvalResult, EvaluatorBatchError
 from dlshogi.book.keys import (
+    POSITION_KEY,
     PositionKey,
     apery_book_key,
     position_key,
@@ -148,6 +149,10 @@ class InFlightSet:
         """Whether ``key`` is currently claimed."""
         return key in self._claims
 
+    def claimed_keys(self):
+        """The currently claimed PositionKeys (for vectorized membership)."""
+        return iter(self._claims)
+
     def get_claims(self) -> dict[PositionKey, Claim]:
         """Snapshot of current claims (for diagnostics)."""
         return dict(self._claims)
@@ -213,6 +218,18 @@ class ClaimReaper:
 # ---------------------------------------------------------------------------
 # PUCT Selection (task 13.3)
 # ---------------------------------------------------------------------------
+
+
+def _in_flight_excluded_mask(keys: np.ndarray, in_flight: InFlightSet) -> np.ndarray:
+    """Bool mask: which of ``keys`` (POSITION_KEY array) are in In_Flight_Set.
+
+    Vectorized ``np.isin`` over the 128-bit keys replaces a per-element
+    dict lookup; the claim set is small (open virtual-loss window).
+    """
+    claimed = list(in_flight.claimed_keys())
+    if not claimed:
+        return np.zeros(keys.shape[0], dtype=np.bool_)
+    return np.isin(keys, np.array(claimed, dtype=POSITION_KEY))
 
 
 def select_edge(
@@ -732,10 +749,7 @@ class SearchCoordinator:
 
             # Determine excluded edges (children in In_Flight_Set)
             child_keys = self._get_child_keys(current_view, edges)
-            excluded_mask = np.array(
-                [self.in_flight.contains(ck) for ck in child_keys],
-                dtype=np.bool_,
-            )
+            excluded_mask = _in_flight_excluded_mask(child_keys, self.in_flight)
             # in_flight_mask is the same as excluded_mask for virtual loss
             in_flight_mask = excluded_mask.copy()
 
@@ -775,8 +789,9 @@ class SearchCoordinator:
             board.push(move)
             depth += 1
 
-            # Compute child key
-            child_key = child_keys[selected_idx]
+            # Compute child key (build the single selected key, not all of them)
+            ck = child_keys[selected_idx]
+            child_key = PositionKey(int(ck["hi"]), int(ck["lo"]))
 
             # Push onto repetition resolver
             resolver.push(child_key, board.is_check())
@@ -951,16 +966,10 @@ class SearchCoordinator:
         edge_list.sort(key=lambda x: x[0])
         return [e[1] for e in edge_list]
 
-    def _get_child_keys(
-        self, view: BookNodeView, edges: np.ndarray
-    ) -> list[PositionKey]:
+    def _get_child_keys(self, view: BookNodeView, edges: np.ndarray) -> np.ndarray:
         """Compute the Position_Key of each edge's child.
 
-        Uses ``position_keys_after`` for efficient batch computation.
+        Returns the POSITION_KEY structured array directly (no per-edge
+        PositionKey objects); callers select/index what they need.
         """
-        moves16 = edges["move16"]
-        keys_arr = position_keys_after(view.sfen, moves16)
-        return [
-            PositionKey(int(keys_arr[i]["hi"]), int(keys_arr[i]["lo"]))
-            for i in range(len(keys_arr))
-        ]
+        return position_keys_after(view.sfen, edges["move16"])
