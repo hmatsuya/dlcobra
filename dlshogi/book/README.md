@@ -31,6 +31,25 @@ The CLI is `python -m dlshogi.book` with four subcommands: `import-terashock`
 (optional), `search`, `propagate`, and `export`. Run
 `python -m dlshogi.book <subcommand> --help` for the full argument list.
 
+### CLI options
+
+| Subcommand | Option | Default | Meaning |
+| --- | --- | --- | --- |
+| `search` | `--config FILE` | required | Path to the YAML configuration file. |
+| `search` | `--model FILE` | required | Path to the ONNX model file. |
+| `search` | `--gpu-count N` | 1 | Number of GPU worker processes to spawn (keep ≤ your GPU count). |
+| `search` | `--verbose` | off | Verbose progress logging. |
+| `search` | `--log-path FILE` | (stdout) | Path for the log output file. |
+| `propagate` | `--config FILE` | required | Path to the YAML configuration file. |
+| `export` | `--config FILE` | required | Path to the YAML configuration file. |
+| `export` | `--apery FILE` | none | Output path for the Apery binary book (omit to skip). |
+| `export` | `--yaneuraou FILE` | none | Output path for the YaneuraOu `.db` text book (omit to skip). |
+| `import-terashock` | `--config FILE` | required | Path to the YAML configuration file. |
+
+These flags are the only options outside the YAML file; there are no
+environment variables or other config mechanisms (the five `PostgreSQL`
+values in the YAML are the only way to reach the database).
+
 ### 1. Build and install the `puct_edge` extension
 
 ```bash
@@ -75,6 +94,43 @@ Throughput_Grace_Period: 600
 
 If any required key is missing or out of range, validation reports **every**
 offending name and exits with status 1 rather than starting partially.
+
+Three cross-value sizing checks (e.g. `Worker_Count < 2 * Batch_Size`,
+`Batch_Size > 2 * Throughput_Floor * Batch_Timeout`, `Throughput_Floor`
+above the measured per-process descent-rate ceiling) emit **warnings** at
+startup; they never block the run. `PostgreSQL password` is the only
+credential and is redacted in all startup logs.
+
+### Configuration options
+
+All ranges are inclusive. "required" = must be present (only
+`Terashock_Book path` is optional).
+
+| Key | Range / unit | Meaning |
+| --- | --- | --- |
+| `PostgreSQL host` | 1–1,024 chars | Book-graph database server host. |
+| `PostgreSQL port` | 1–1,024 chars (**string**, not int) | Database server port. |
+| `PostgreSQL user` | 1–1,024 chars | Database user. |
+| `PostgreSQL password` | 1–1,024 chars | Database password; redacted in logs. |
+| `PostgreSQL database` | 1–1,024 chars | Database name. |
+| `Cache_Budget` | 256 MiB – 1 TiB, bytes | Byte budget for the in-process node LRU. The LRU never exceeds this size and under pressure it triggers out-of-band flushes (flush threshold is half the budget); a share of it is also reserved for the Terashock index LRU. |
+| `Worker_Count` | 1–1,024 | Number of concurrent search workers in `search`. |
+| `Batch_Size` | 1–4,096 | Fixed Evaluator batch size: positions are collected up to this size, short batches are zero-padded to it. |
+| `Batch_Timeout` | 1–1,000 ms | Max time to wait for a full `Batch_Size` before dispatching the partial batch to the Evaluator. |
+| `Virtual_Loss` | 0–16 | Visits added to in-flight child nodes during parallel PUCT search so concurrent workers do not collapse onto the same move. |
+| `Terashock_Prior_Weight` | 0.0–1.0 | Mix weight of the Terashock-derived prior against the network policy (0 = pure network, 1 = pure Terashock). |
+| `Eval_Coef` | 1–10,000 | Temperature of the sigmoid that turns a Terashock evaluation into a win rate: `1 / (1 + exp(-score / Eval_Coef))`. Also used to convert exported values back to log-odds. |
+| `Draw_Value_Black` | 0.0–1.0 | Score assigned to a draw for Black (side to move). 0.5 is an exact draw. |
+| `Draw_Value_White` | 0.0–1.0 | Same for White. |
+| `Max_Book_Ply` | 0–1,024 | Depth limit for book growth in `search` and frame partitioning in `propagate`. 0 disables the depth limit. |
+| `Propagation_Visit_Threshold` | 0–1,000,000 (absolute visits) | Edges with fewer visits are handled in a separate (lighter) partition during the negamax propagation pass. 0 disables the partition. |
+| `Export_Visit_Threshold` | 0.0–1.0 (ratio) | Edges whose `visit_count / node_visit_count` ratio is below this are excluded from the exported book. |
+| `Connection_Retry_Limit` | 0–100 | Number of PostgreSQL reconnect retries after a failed attempt, with waits of 1 s, 2 s, 4 s, … capped at 60 s. |
+| `Root_Position` | 1–256 chars (SFEN) | Root position of the book; `search` grows the graph from here and `import-terashock` seeds it here. SFEN legality is checked at run time, not at config validation. |
+| `Report_Interval` | 1–3,600 s | Seconds between progress-report ticks. |
+| `Throughput_Floor` | 0.01–100,000 descents/s | Measured descent rate below which the degraded-throughput warning may fire. Keep it at or below roughly 1,500 × (number of `search` processes). |
+| `Throughput_Grace_Period` | 60–86,400 s | How long the rate may stay below `Throughput_Floor` before the warning fires. |
+| `Terashock_Book path` | 1–4,096 chars, **optional** | Path to a YaneuraOu Terashock `.db` to seed from. If absent, `import-terashock` and the Terashock prior index are disabled. |
 
 ### 3. Build the book
 
