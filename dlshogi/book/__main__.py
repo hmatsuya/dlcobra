@@ -23,6 +23,7 @@ import multiprocessing
 import os
 import signal
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -315,6 +316,11 @@ def _search_child_process(
     _setup_logging()
     _LOG.info("Search child process starting (gpu_id=%d, pid=%d)", gpu_id, os.getpid())
 
+    # Pin this child to its GPU before any CUDA/ORT initialization. ORT's
+    # provider fallback (e.g. TensorRT unavailable) drops per-provider
+    # device_id options, so CUDA_VISIBLE_DEVICES is the reliable pin.
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+
     # C1-C3: Load and validate config.
     from dlshogi.book.config import BookConfig, ConfigValidationError, load_yaml
 
@@ -369,7 +375,7 @@ async def _search_child_async(
     # Create the Evaluator with a real ONNX session.
     session = OnnxRuntimeInferenceSession(
         model_path,
-        device_id=gpu_id,
+        device_id=0,
         fixed_batch_size=cfg.batch_size,
     )
     evaluator = Evaluator(
@@ -548,6 +554,7 @@ async def _search_parent_process(
 
     # Install signal handlers to forward stop signals to children.
     stop_requested = False
+    stop_event = threading.Event()
 
     def _forward_signal(signum: int, frame: object) -> None:
         nonlocal stop_requested
@@ -565,9 +572,27 @@ async def _search_parent_process(
                     os.kill(child.pid, signal.SIGTERM)
                 except OSError:
                     pass
+        stop_event.set()
 
     signal.signal(signal.SIGINT, _forward_signal)
     signal.signal(signal.SIGTERM, _forward_signal)
+
+    # Block until a stop signal arrives or a child dies abnormally. The 60 s
+    # budget then bounds the graceful-shutdown wait, not the run itself.
+    while True:
+        if stop_event.wait(timeout=1.0):
+            break
+        if any(not child.is_alive() for child in children):
+            _LOG.warning(
+                "A child process died unexpectedly; stopping the remaining children."
+            )
+            for child in children:
+                if child.is_alive() and child.pid is not None:
+                    try:
+                        os.kill(child.pid, signal.SIGTERM)
+                    except OSError:
+                        pass
+            break
 
     # Wait for all children within the 60 s budget.
     deadline = time.monotonic() + _SHUTDOWN_BUDGET_S
