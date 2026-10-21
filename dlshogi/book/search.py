@@ -585,11 +585,13 @@ class SearchCoordinator:
         c_puct = 2.0 ** 0.5
 
         # Ensure root node exists (Requirement 4.8). When absent, the root
-        # is created with visit count 0 and value sum 0 by the descent's
-        # own expansion path (termination rule 3 below), which is the same
-        # atomic insert_expansion every other node uses. An edgeless
-        # placeholder view is handed to the loop so rule 3 fires and the
-        # root is inserted *with* its edges (Requirement 4.3); pre-inserting
+        # is created with visit count 0 and value sum 0 by the descent's own
+        # termination path -- rule 3's expansion write when the root has
+        # legal moves, or rule 2's edgeless write when the root is itself a
+        # terminal position -- both through the same atomic insert_expansion
+        # every other node uses. An edgeless placeholder view is handed to
+        # the loop so one of those rules fires and the root is inserted with
+        # whichever edge set it actually has (Requirement 4.3); pre-inserting
         # an empty edgeless row here would instead be retained by
         # ON CONFLICT DO NOTHING and permanently block the root's own
         # expansion, so no separate root INSERT is issued.
@@ -640,25 +642,32 @@ class SearchCoordinator:
             if self._stop_requested:
                 return
 
-            # Termination rule 1: Max_Book_Ply depth reached
-            if config.max_book_ply > 0 and depth >= config.max_book_ply:
-                # Leaf: value from terminal check or evaluator
-                terminal_result = check_terminal(board)
-                if terminal_result.terminal != Terminal.NONE:
-                    leaf_value = terminal_result.value
+            terminal_result = check_terminal(board)
+
+            # Termination rule 1: Max_Book_Ply depth reached (non-terminal leaf)
+            if (
+                config.max_book_ply > 0
+                and depth >= config.max_book_ply
+                and terminal_result.terminal == Terminal.NONE
+            ):
+                if self._is_already_evaluated(current_view):
+                    leaf_value = current_view.eval_win_rate if current_view.eval_win_rate is not None else 0.5
                 else:
-                    # Check if this is a resume case (already evaluated)
-                    if self._is_already_evaluated(current_view):
-                        leaf_value = current_view.eval_win_rate if current_view.eval_win_rate is not None else 0.5
-                    else:
-                        eval_result = await self._evaluator.enqueue(board)
-                        leaf_value = eval_result.win_rate
+                    eval_result = await self._evaluator.enqueue(board)
+                    leaf_value = eval_result.win_rate
+                    # Not persisted: an edgeless row with eval_win_rate would
+                    # read as "already evaluated" and never expand after a
+                    # resume with a larger Max_Book_Ply (F-16).
                 break
 
-            # Termination rule 2: Terminal state
-            terminal_result = check_terminal(board)
+            # Termination rule 2: Terminal state (also at the ply limit)
             if terminal_result.terminal != Terminal.NONE:
                 leaf_value = terminal_result.value
+                if not self._is_already_evaluated(current_view):
+                    if not await self._persist_terminal(
+                        board, current_key, terminal_result.terminal
+                    ):
+                        return
                 break
 
             # Check repetition
@@ -715,18 +724,7 @@ class SearchCoordinator:
                     )
                     write_result = await self._store.insert_expansion(expansion)
 
-                    if write_result.outcome == WriteOutcome.COMMITTED:
-                        self.expansions_committed += 1
-                        if self._reporter is not None:
-                            self._reporter.record_node_created(len(edges_data))
-                    elif write_result.outcome == WriteOutcome.DUPLICATE:
-                        self.expansions_duplicate += 1
-                        if self._reporter is not None:
-                            self._reporter.record_event("duplicate_node_creation")
-                    elif write_result.outcome == WriteOutcome.COLLISION:
-                        self.expansions_collision += 1
-                    elif write_result.outcome == WriteOutcome.FAILED:
-                        self.expansions_failed += 1
+                    if not self._count_write(write_result, len(edges_data)):
                         return
 
                     # Leaf value is the evaluator's win rate
@@ -895,6 +893,44 @@ class SearchCoordinator:
         if view.eval_win_rate is not None:
             return True
         return False
+
+    def _count_write(self, write_result, n_edges: int) -> bool:
+        """Count an insert_expansion outcome; False means the write FAILED."""
+        outcome = write_result.outcome
+        if outcome == WriteOutcome.COMMITTED:
+            self.expansions_committed += 1
+            if self._reporter is not None:
+                self._reporter.record_node_created(n_edges)
+        elif outcome == WriteOutcome.DUPLICATE:
+            self.expansions_duplicate += 1
+            if self._reporter is not None:
+                self._reporter.record_event("duplicate_node_creation")
+        elif outcome == WriteOutcome.COLLISION:
+            self.expansions_collision += 1
+        else:
+            self.expansions_failed += 1
+            return False
+        return True
+
+    async def _persist_terminal(
+        self, board: cshogi.Board, key: PositionKey, terminal: Terminal
+    ) -> bool:
+        """Write a terminal leaf as an edgeless row (R8.5, R8.6, R8.11).
+
+        No In_Flight claim: there is no Evaluator call, and a concurrent
+        duplicate insert is resolved by ON CONFLICT DO NOTHING (DUPLICATE).
+        Returns False if the write failed and the descent must stop.
+        """
+        result = await self._store.insert_expansion(
+            ExpansionWrite(
+                key=key,
+                sfen=board.sfen(),
+                apery_key=apery_book_key(board.sfen()),
+                terminal=terminal,
+                edges=[],
+            )
+        )
+        return self._count_write(result, 0)
 
     def _build_edges(
         self,

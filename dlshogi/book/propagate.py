@@ -43,7 +43,7 @@ _HARD_FRAME_GUARD = 1024
 class PropagationStats:
     """Propagation pass outcome reported to the Progress_Reporter (Req 9.7)."""
 
-    nodes: int  # Book_Nodes pushed as frames and written
+    nodes: int  # Book_Nodes written this pass: frames, plus terminal children written directly
     draw_revisits: int  # Criterion 5 on-path revisits
     unevaluated_leaves: int  # Criterion 10: edgeless, no eval_win_rate
     path_cutoffs: int  # Frames not pushed because of depth guard
@@ -152,6 +152,23 @@ async def propagate(
         if terminal == Terminal.WIN_FOR_STM:
             return 1.0
         return 0.0
+
+    # --- Helper: a terminal child still needs a prop_value, or export drops its edge ---
+    async def _store_terminal_child(key: PositionKey, terminal: Terminal) -> float:
+        """Return the terminal child's value, storing it once per pass (R9.4, R9.15)."""
+        value = _terminal_contribution(terminal)
+        if key not in memo:
+            await store.set_propagation([
+                PropagationWrite(
+                    key=key,
+                    prop_value=value,
+                    prop_best_move16=None,
+                    prop_epoch=pass_id,
+                )
+            ])
+            memo[key] = value
+            stats.nodes += 1
+        return value
 
     # --- Helper: build a frame for a node ---
     async def _build_frame(key: PositionKey, view: BookNodeView) -> _Frame:
@@ -296,7 +313,7 @@ async def propagate(
             if child_info is not None:
                 terminal, eval_wr = child_info
                 if terminal != Terminal.NONE:
-                    frame.contributions[i] = _terminal_contribution(terminal)
+                    frame.contributions[i] = await _store_terminal_child(child_key, terminal)
                     continue
 
             # Branch 2: Child on current path (criterion 5)
@@ -336,7 +353,8 @@ async def propagate(
 
             # Branch 1: Terminal child (criterion 4)
             if child_view is not None and child_view.terminal != Terminal.NONE:
-                frame.contributions[i] = _terminal_contribution(child_view.terminal)
+                value = await _store_terminal_child(child_key, child_view.terminal)
+                frame.contributions[i] = value
                 continue
 
             # Branch 2: Child on current path (criterion 5)
