@@ -790,6 +790,12 @@ class NodeStore:
         # PostgreSQL), so uncommitted increments are visible on read
         # (Requirement 4.5). Populated by `backup()`, drained by `flush()`.
         self._pending_backup: dict[PositionKey, "BackupDelta"] = {}
+        # Deltas flush() found no book_node row for. A node-only delta is the
+        # expected shape for a Max_Book_Ply leaf, which is deliberately never
+        # persisted (F-16); one with edge deltas is a path node that should
+        # have a row, which is a real anomaly (F-14).
+        self.rowless_leaf_deltas = 0
+        self.rowless_deltas_dropped = 0
 
         # -- task 9.2: backend selection for the backup patch path ---------
         # Defaults to False (the fallback path) until _detect_puct_edge_
@@ -1680,13 +1686,11 @@ class NodeStore:
         read-modify-write, so Requirement 11.8's no-lost-update guarantee
         holds under either backend.
 
-        A node present in the snapshot but absent from `book_node` (its
-        expansion write has not yet committed, or was lost) is skipped
-        rather than raising: the deltas for that key remain lost only in
-        the sense that a descent that walked through an unexpanded node is
-        not possible by construction (the node was created by
-        `insert_expansion` before any descent could select an edge under
-        it), so this is a defensive no-op, not an expected path.
+        A node present in the snapshot but absent from `book_node` is skipped
+        rather than raising (see `_note_rowless_delta`): the expected case is
+        the unpersisted Max_Book_Ply leaf of a descent, whose delta carries
+        no edge deltas and is only counted; a rowless delta that does carry
+        edge deltas is logged as a WARNING.
         """
         snapshot = self._pending_backup
         self._pending_backup = {}
@@ -1723,6 +1727,33 @@ class NodeStore:
             raise
         self._write_latency.record(time.monotonic() - start)
 
+    def _note_rowless_delta(self, delta: BackupDelta) -> None:
+        """Account for a backup delta whose book_node row does not exist.
+
+        A delta with no edge deltas is the leaf of a descent that ended at
+        Max_Book_Ply: that node was never persisted (F-16), so its own
+        visit has no row to land in. Count it quietly. A delta that carries
+        edge deltas belongs to a path node the descent selected an edge from,
+        which therefore had a row; losing it is a real fault, so it stays a
+        WARNING. Neither is re-queued: a leaf never gets a row, so keeping
+        its delta would grow the accumulator without bound.
+        """
+        if not delta.edge_deltas:
+            self.rowless_leaf_deltas += 1
+            _LOG.debug(
+                "Node_Store.flush: no book_node row for %r; skipping the "
+                "leaf-only delta of an unpersisted Max_Book_Ply leaf",
+                delta.key,
+            )
+            return
+        self.rowless_deltas_dropped += 1
+        _LOG.warning(
+            "Node_Store.flush: no book_node row for %r; dropping %d pending "
+            "delta(s) for a node that should exist",
+            delta.key,
+            1 + len(delta.edge_deltas),
+        )
+
     async def _apply_backup_row_fallback(
         self, conn: asyncpg.Connection, delta: BackupDelta
     ) -> None:
@@ -1751,12 +1782,7 @@ class NodeStore:
             key_lo,
         )
         if row is None:
-            _LOG.warning(
-                "Node_Store.flush: no book_node row for %r; dropping %d pending "
-                "delta(s) for an unexpanded node",
-                delta.key,
-                1 + len(delta.edge_deltas),
-            )
+            self._note_rowless_delta(delta)
             return
 
         edges_blob = bytes(row["edges"])
@@ -1854,12 +1880,7 @@ class NodeStore:
             )
 
         if status.rsplit(" ", 1)[-1] == "0":
-            _LOG.warning(
-                "Node_Store.flush: no book_node row for %r; dropping %d pending "
-                "delta(s) for an unexpanded node",
-                delta.key,
-                1 + len(delta.edge_deltas),
-            )
+            self._note_rowless_delta(delta)
             return
 
         # Same invalidation as the fallback path (see its docstring):
