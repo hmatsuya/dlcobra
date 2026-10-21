@@ -63,6 +63,9 @@ _LOG = logging.getLogger(__name__)
 # not changed on disk). Bump this whenever BookDBParser semantics change.
 PARSER_VERSION = 1
 
+# Imports recorded before terashock_parser_version existed were all made by v1.
+_LEGACY_PARSER_VERSION = 1
+
 # Fraction of Cache_Budget allocated to the Terashock_Index LRU.
 # The LRU stores decoded TerashockLookupResult objects; each entry is
 # approximately sizeof(PACKED_TS_MOVE) * avg_moves + SFEN overhead.
@@ -198,7 +201,8 @@ async def check_terashock_source(pool: asyncpg.Pool, cfg: BookConfig) -> bool:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT terashock_source_path, terashock_source_size, "
-            "       terashock_source_mtime, terashock_entry_count "
+            "       terashock_source_mtime, terashock_entry_count, "
+            "       terashock_parser_version "
             "FROM book_meta WHERE id = 1"
         )
 
@@ -209,22 +213,29 @@ async def check_terashock_source(pool: asyncpg.Pool, cfg: BookConfig) -> bool:
     recorded_size = row["terashock_source_size"]
     recorded_mtime = row["terashock_source_mtime"]
     recorded_count = row["terashock_entry_count"]
+    # NULL: imported before the version was recorded, which was always parser
+    # version 1 (F-13).
+    recorded_parser = row["terashock_parser_version"]
+    if recorded_parser is None:
+        recorded_parser = _LEGACY_PARSER_VERSION
 
     if recorded_path is None:
         # No previous import recorded.
         return True
 
-    # Compare each field; any mismatch triggers reimport.
+    # Compare each field; any mismatch triggers reimport. A parser change
+    # invalidates the index even when the file itself is untouched.
     if (
         recorded_path != str(book_path)
         or recorded_size != file_id.size
         or recorded_mtime != file_id.mtime
+        or recorded_parser != file_id.parser_version
     ):
         _LOG.info(
-            "Terashock source identity mismatch: recorded (%s, size=%s, mtime=%s) "
-            "vs current (%s, size=%s, mtime=%s); reimport needed",
-            recorded_path, recorded_size, recorded_mtime,
-            str(book_path), file_id.size, file_id.mtime,
+            "Terashock source identity mismatch: recorded (%s, size=%s, mtime=%s, "
+            "parser=v%s) vs current (%s, size=%s, mtime=%s, parser=v%s); reimport needed",
+            recorded_path, recorded_size, recorded_mtime, recorded_parser,
+            str(book_path), file_id.size, file_id.mtime, file_id.parser_version,
         )
         return True
 
@@ -397,13 +408,15 @@ async def import_terashock(
                     terashock_source_path  = $1,
                     terashock_source_size  = $2,
                     terashock_source_mtime = $3,
-                    terashock_entry_count  = $4
+                    terashock_entry_count  = $4,
+                    terashock_parser_version = $5
                 WHERE id = 1
                 """,
                 str(book_path),
                 st.st_size,
                 int(st.st_mtime),
                 unique_count,
+                PARSER_VERSION,
             )
 
     stats = ImportStats(

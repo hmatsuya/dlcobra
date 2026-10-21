@@ -172,9 +172,12 @@ _REPAIR_DDL: tuple[str, ...] = (
         terashock_source_size  bigint,
         terashock_source_mtime bigint,
         terashock_entry_count  bigint,
+        terashock_parser_version integer,
         created_at             timestamptz NOT NULL DEFAULT now()
     )
     """,
+    # Databases created before the parser version was recorded (F-13).
+    "ALTER TABLE book_meta ADD COLUMN IF NOT EXISTS terashock_parser_version integer",
     """
     CREATE TABLE IF NOT EXISTS book_node (
         key_hi           bigint  NOT NULL,

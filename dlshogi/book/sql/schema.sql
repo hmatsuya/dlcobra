@@ -26,6 +26,7 @@ CREATE TABLE book_meta (
     terashock_source_size  bigint,
     terashock_source_mtime bigint,
     terashock_entry_count  bigint,
+    terashock_parser_version integer,  -- NULL = imported before this was recorded (parser v1)
     created_at             timestamptz NOT NULL DEFAULT now()
 );
 
