@@ -272,6 +272,10 @@ class SchemaCreationError(NodeStoreError):
         )
 
 
+class SchemaAbsentError(NodeStoreError):
+    """A read-only startup found no schema; only the parent process creates it."""
+
+
 class SchemaVersionMismatchError(NodeStoreError):
     """Raised when the recorded schema version or Zobrist fingerprint disagree
     with the running ones (Requirement 2.8).
@@ -981,13 +985,21 @@ class NodeStore:
 
     # -- schema management (Requirement 2.4, 2.5, 2.6, 2.7, 2.8) ---------
 
-    async def ensure_schema(self) -> None:
+    async def ensure_schema(self, *, read_only: bool = False) -> None:
         """Run the full C6-C9 schema decision (design.md's startup flowchart).
 
         - schema absent -> `_create_schema` (create + record version/
           fingerprint/root, atomically, within the 300 s deadline);
         - schema present -> `_check_version_and_fingerprint`, then
           `_repair_schema` (create only what is absent).
+
+        With ``read_only=True`` (search child processes; the parent has
+        already created and repaired the schema) nothing is created or
+        altered: an absent schema raises `SchemaAbsentError`, a present one
+        is only version/fingerprint-checked. Repair DDL takes an
+        ACCESS EXCLUSIVE lock on ``book_node``, so running it from every
+        child would stall every other process's reads on each child start
+        (F-12).
 
         Always loads `get_root()`'s cached values at the end, so later
         code (this module's `root_node_exists()`, and `__main__.py`'s C11
@@ -1001,11 +1013,17 @@ class NodeStore:
         async with self.pool.acquire() as conn:
             present = await self._schema_present(conn)
         if not present:
+            if read_only:
+                raise SchemaAbsentError(
+                    f"PostgreSQL database {self._config.pg_database!r} has no book "
+                    "schema; the parent process creates it before children start"
+                )
             await self._create_schema()
         else:
             async with self.pool.acquire() as conn:
                 await self._check_version_and_fingerprint(conn)
-                await self._repair_schema(conn)
+                if not read_only:
+                    await self._repair_schema(conn)
         await self._load_root()
         await self._detect_puct_edge_extension()
 

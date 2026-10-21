@@ -191,6 +191,7 @@ async def _connect_and_ensure_schema(
     from dlshogi.book.node_store import (
         NodeStore,
         NodeStoreConnectionError,
+        SchemaAbsentError,
         SchemaCreationError,
         SchemaVersionMismatchError,
     )
@@ -208,7 +209,10 @@ async def _connect_and_ensure_schema(
 
     # C6-C9: Schema presence check, creation/repair, version/fingerprint.
     try:
-        await store.ensure_schema()
+        await store.ensure_schema(read_only=read_only)
+    except SchemaAbsentError as exc:
+        _LOG.error("%s", exc)
+        sys.exit(1)
     except SchemaCreationError as exc:
         _LOG.error("Schema creation failed: %s (Requirement 2.6)", exc)
         sys.exit(1)
