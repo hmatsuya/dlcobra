@@ -227,18 +227,34 @@ async def _connect_and_ensure_schema(
 # ---------------------------------------------------------------------------
 
 
-async def _check_root_mismatch(store: "NodeStore") -> None:
-    """C11: If any node rows exist but no root row, report and exit (Req 10.8)."""
-    has_nodes = await store.any_node_rows()
-    if has_nodes:
-        has_root = await store.root_node_exists()
-        if not has_root:
-            _LOG.error(
-                "Root mismatch: book_node has rows but no Root_Position row "
-                "exists. The configured Root_Position does not match the "
-                "graph's root. (Requirement 10.8)"
-            )
-            sys.exit(1)
+async def _check_root_mismatch(store: "NodeStore", cfg: "BookConfig") -> None:
+    """C11: Report and exit when the graph's root is not the configured one (Req 10.8).
+
+    Two cases, both only when ``book_node`` already holds rows: the recorded
+    root has no row, or the configured Root_Position is a different position
+    from the recorded one (the recorded root is fixed at schema creation,
+    Req 2.7). An empty book is a first start and always passes.
+    """
+    from dlshogi.book.keys import fold_u64_to_i64, position_key_from_sfen
+
+    if not await store.any_node_rows():
+        return
+    _, rec_hi, rec_lo = await store.get_root()
+    cfg_key = position_key_from_sfen(cfg.root_position)
+    if (fold_u64_to_i64(cfg_key.hi), fold_u64_to_i64(cfg_key.lo)) != (rec_hi, rec_lo):
+        _LOG.error(
+            "Root mismatch: configured Root_Position %r differs from the "
+            "graph's recorded root. (Requirement 10.8)",
+            cfg.root_position,
+        )
+        sys.exit(1)
+    if not await store.root_node_exists():
+        _LOG.error(
+            "Root mismatch: book_node has rows but no row exists for the "
+            "configured Root_Position %r. (Requirement 10.8)",
+            cfg.root_position,
+        )
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -358,7 +374,7 @@ async def _search_child_async(
     store = await _connect_and_ensure_schema(cfg, role="search", read_only=True)
 
     # C11: Root position check.
-    await _check_root_mismatch(store)
+    await _check_root_mismatch(store, cfg)
 
     # C12-C15: Terashock (lookup only, no import from child).
     terashock_idx: Optional[TerashockIndex] = None
@@ -460,7 +476,7 @@ async def _search_single_process(
     store = await _connect_and_ensure_schema(cfg, role="search")
 
     # C11: Root position check.
-    await _check_root_mismatch(store)
+    await _check_root_mismatch(store, cfg)
 
     # C12-C15: Terashock.
     terashock_idx = await _handle_terashock(store, cfg, "search")
@@ -528,7 +544,7 @@ async def _search_parent_process(
     store = await _connect_and_ensure_schema(cfg, role="search")
 
     # C11: Root position check.
-    await _check_root_mismatch(store)
+    await _check_root_mismatch(store, cfg)
 
     # C12-C15: Terashock import (only parent imports).
     await _handle_terashock(store, cfg, "search")
@@ -646,7 +662,7 @@ async def _propagate_async(cfg: "BookConfig") -> int:
     store = await _connect_and_ensure_schema(cfg, role="propagate")
 
     # C11: Root position check.
-    await _check_root_mismatch(store)
+    await _check_root_mismatch(store, cfg)
 
     # Run propagation.
     root_key = position_key_from_sfen(cfg.root_position)
@@ -698,7 +714,7 @@ async def _export_async(
     store = await _connect_and_ensure_schema(cfg, role="export")
 
     # C11: Root position check.
-    await _check_root_mismatch(store)
+    await _check_root_mismatch(store, cfg)
 
     # Run export.
     try:
@@ -748,7 +764,7 @@ async def _import_terashock_async(cfg: "BookConfig") -> int:
     store = await _connect_and_ensure_schema(cfg, role="search")
 
     # C11: Root position check.
-    await _check_root_mismatch(store)
+    await _check_root_mismatch(store, cfg)
 
     # Run import.
     _LOG.info("Importing Terashock book from %s...", cfg.terashock_book)
