@@ -59,6 +59,8 @@ CATEGORIES = (
     "terashock_illegal_discard",
     "evaluator_failure",
     "duplicate_node_creation",
+    "descent_abandoned",
+    "descent_timeout",
 )
 
 # ---------------------------------------------------------------------------
@@ -275,6 +277,8 @@ class ProgressRecord:
     terashock_illegal_discards: int
     evaluator_failures: int
     duplicate_node_creations: int
+    descents_abandoned: int
+    descent_timeouts: int
     process_id: int = field(default_factory=os.getpid)
 
     def to_dict(self) -> dict[str, Any]:
@@ -295,6 +299,8 @@ class ProgressRecord:
             "terashock_illegal_discards": self.terashock_illegal_discards,
             "evaluator_failures": self.evaluator_failures,
             "duplicate_node_creations": self.duplicate_node_creations,
+            "descents_abandoned": self.descents_abandoned,
+            "descent_timeouts": self.descent_timeouts,
             "process_id": self.process_id,
         }
 
@@ -357,6 +363,8 @@ class ProgressReporter:
         self.terashock_illegal_discards: int = 0
         self.evaluator_failures: int = 0
         self.duplicate_node_creations: int = 0
+        self.descents_abandoned: int = 0
+        self.descent_timeouts: int = 0
 
         # --- Incrementally maintained counts (NOT SELECT count(*)) ---
         self.node_count: int = 0
@@ -410,7 +418,8 @@ class ProgressReporter:
         """Record a single event of the given category.
 
         Categories: 'terashock_injection', 'terashock_illegal_discard',
-        'evaluator_failure', 'duplicate_node_creation'.
+        'evaluator_failure', 'duplicate_node_creation', 'descent_abandoned'
+        (R4.9), 'descent_timeout' (R15.6).
         """
         if category == "terashock_injection":
             self.terashock_injections += 1
@@ -420,6 +429,10 @@ class ProgressReporter:
             self.evaluator_failures += 1
         elif category == "duplicate_node_creation":
             self.duplicate_node_creations += 1
+        elif category == "descent_abandoned":
+            self.descents_abandoned += 1
+        elif category == "descent_timeout":
+            self.descent_timeouts += 1
         else:
             raise ValueError(f"unknown event category: {category!r}")
 
@@ -520,6 +533,8 @@ class ProgressReporter:
             terashock_illegal_discards=self.terashock_illegal_discards,
             evaluator_failures=self.evaluator_failures,
             duplicate_node_creations=self.duplicate_node_creations,
+            descents_abandoned=self.descents_abandoned,
+            descent_timeouts=self.descent_timeouts,
             process_id=self.process_id,
         )
 

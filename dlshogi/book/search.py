@@ -534,7 +534,7 @@ class SearchCoordinator:
             )
         except asyncio.TimeoutError:
             _LOG.debug("Worker %d: descent timed out", worker_id)
-            self.descents_timed_out += 1
+            self._count_timeout()
         except asyncio.CancelledError:
             # Cooperative shutdown (Requirement 10.6): re-raise after cleanup
             raise
@@ -639,7 +639,9 @@ class SearchCoordinator:
         while True:
             # Per-node deadline check for CPU-bound stalls
             if loop.time() > deadline:
-                # Abandon: timeout reached
+                # Same R15.6 outcome as asyncio.wait_for expiring, reached by a
+                # CPU-bound stall that never yielded to the event loop.
+                self._count_timeout()
                 return
 
             # Stop check
@@ -692,7 +694,7 @@ class SearchCoordinator:
                 # Expand: claim the node in the In_Flight_Set
                 if not self.in_flight.test_and_add(current_key, worker_id):
                     # Already claimed by another worker; abandon
-                    self.descents_abandoned += 1
+                    self._count_abandoned()
                     return
                 claimed.append(current_key)
 
@@ -769,7 +771,7 @@ class SearchCoordinator:
 
             if selected_idx is None:
                 # All edges excluded (Requirement 4.9): abandon
-                self.descents_abandoned += 1
+                self._count_abandoned()
                 return
 
             # Move to the selected child. Edges store the 16-bit move code
@@ -899,6 +901,18 @@ class SearchCoordinator:
         if view.eval_win_rate is not None:
             return True
         return False
+
+    def _count_abandoned(self) -> None:
+        """An abandoned descent changed no count (R4.9); tell the reporter."""
+        self.descents_abandoned += 1
+        if self._reporter is not None:
+            self._reporter.record_event("descent_abandoned")
+
+    def _count_timeout(self) -> None:
+        """A descent that outlived _DESCENT_TIMEOUT_S, its backup never applied (R15.6)."""
+        self.descents_timed_out += 1
+        if self._reporter is not None:
+            self._reporter.record_event("descent_timeout")
 
     def _count_terashock(
         self, edges_data: list[dict[str, Any]], ts_lookup: Optional[TerashockLookupResult]

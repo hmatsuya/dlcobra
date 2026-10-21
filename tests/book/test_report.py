@@ -60,6 +60,8 @@ class ProgressCountersMachine(RuleBasedStateMachine):
         self.expected_terashock_illegal_discards = 0
         self.expected_evaluator_failures = 0
         self.expected_duplicate_node_creations = 0
+        self.expected_descents_abandoned = 0
+        self.expected_descent_timeouts = 0
         self.expected_descents = 0
         self.expected_batches = 0
         self.total_events = 0
@@ -69,6 +71,8 @@ class ProgressCountersMachine(RuleBasedStateMachine):
         self.prev_terashock_illegal_discards = 0
         self.prev_evaluator_failures = 0
         self.prev_duplicate_node_creations = 0
+        self.prev_descents_abandoned = 0
+        self.prev_descent_timeouts = 0
         self.prev_descents = 0
 
     @rule(category=st.sampled_from(CATEGORIES))
@@ -85,6 +89,10 @@ class ProgressCountersMachine(RuleBasedStateMachine):
             self.expected_evaluator_failures += 1
         elif category == "duplicate_node_creation":
             self.expected_duplicate_node_creations += 1
+        elif category == "descent_abandoned":
+            self.expected_descents_abandoned += 1
+        elif category == "descent_timeout":
+            self.expected_descent_timeouts += 1
 
     @rule()
     def record_descent(self):
@@ -111,6 +119,8 @@ class ProgressCountersMachine(RuleBasedStateMachine):
         assert self.reporter.terashock_illegal_discards == self.expected_terashock_illegal_discards
         assert self.reporter.evaluator_failures == self.expected_evaluator_failures
         assert self.reporter.duplicate_node_creations == self.expected_duplicate_node_creations
+        assert self.reporter.descents_abandoned == self.expected_descents_abandoned
+        assert self.reporter.descent_timeouts == self.expected_descent_timeouts
         assert self.reporter.cumulative_descents == self.expected_descents
 
     @invariant()
@@ -120,6 +130,8 @@ class ProgressCountersMachine(RuleBasedStateMachine):
         assert self.reporter.terashock_illegal_discards >= self.prev_terashock_illegal_discards
         assert self.reporter.evaluator_failures >= self.prev_evaluator_failures
         assert self.reporter.duplicate_node_creations >= self.prev_duplicate_node_creations
+        assert self.reporter.descents_abandoned >= self.prev_descents_abandoned
+        assert self.reporter.descent_timeouts >= self.prev_descent_timeouts
         assert self.reporter.cumulative_descents >= self.prev_descents
 
         # Update snapshots
@@ -127,6 +139,8 @@ class ProgressCountersMachine(RuleBasedStateMachine):
         self.prev_terashock_illegal_discards = self.reporter.terashock_illegal_discards
         self.prev_evaluator_failures = self.reporter.evaluator_failures
         self.prev_duplicate_node_creations = self.reporter.duplicate_node_creations
+        self.prev_descents_abandoned = self.reporter.descents_abandoned
+        self.prev_descent_timeouts = self.reporter.descent_timeouts
         self.prev_descents = self.reporter.cumulative_descents
 
     @invariant()
@@ -141,6 +155,8 @@ class ProgressCountersMachine(RuleBasedStateMachine):
         assert last["terashock_illegal_discards"] <= self.reporter.terashock_illegal_discards
         assert last["evaluator_failures"] <= self.reporter.evaluator_failures
         assert last["duplicate_node_creations"] <= self.reporter.duplicate_node_creations
+        assert last["descents_abandoned"] <= self.reporter.descents_abandoned
+        assert last["descent_timeouts"] <= self.reporter.descent_timeouts
         assert last["cumulative_descents"] <= self.reporter.cumulative_descents
 
 
