@@ -253,82 +253,42 @@ def test_pop_decrements_occurrence_count(key: PositionKey, draw_values: tuple):
 
 
 class TestTerminalStates:
-    """Test check_terminal() and wcsc_declaration_win()."""
+    """Test check_terminal() and wcsc_declaration_win().
 
-    def test_checkmate_is_loss_for_stm(self):
-        """Zero legal moves returns Terminal.LOSS_FOR_STM with value 0 (Req 8.5)."""
-        # A simple mate position: White king cornered with Gold delivering mate
-        # tsume: Black's gold on 5a checking White king on 5b with no escape
+    Every position below is a fixed SFEN and the setup is asserted, so a
+    regression in the predicate fails the test instead of skipping it (F-03).
+    """
+
+    # Real checkmates (White to move, no legal move, in check).
+    _MATES = [
+        # White king 9a, Black gold 9b guarded by the rook on 9c.
+        "k8/G8/R8/9/9/9/9/9/8K w - 1",
+        # The mated child produced by the search in the F-02 reproduction.
+        "3g1kpnb/2s2+P2g/lpnp3+Sl/p1p1N2Pp/4p1P1P/1P4+r2/P1PPP1G1L/LB1G1K1p1/1NS6 w SPr 76",
+    ]
+
+    # Declaration-win fixtures. Black king and 13 other pieces fill White's
+    # three ranks: 4 big pieces (20 pt) + 10 small = 30 pt, 14 pieces.
+    _DECL_BASE = "RBKBR4/GSGSG4/GSGSG4/9/9/9/9/9/4k4 b - 1"
+    # Exactly 10 non-king pieces on the board and 28 points (26 + 2 pawns in hand).
+    _DECL_AT_LIMIT = "RBKBR4/GSGSG4/G8/9/9/9/9/9/4k4 b 2P 1"
+
+    @staticmethod
+    def _board(sfen: str):
         board = cshogi.Board()
-        # Use a known checkmate SFEN where side to move has no legal moves.
-        # White king at 1a, Black rook at 1c, Black gold at 2b -> mate
-        sfen = "k8/1G7/R8/9/9/9/9/9/8K b - 1"
         board.set_sfen(sfen)
+        return board
 
-        moves = list(board.legal_moves)
-        if len(moves) == 0:
-            # This is a position where the current STM has no moves
-            # But wait -- in this SFEN it's Black's turn, and Black has moves.
-            # We need White to be mated (White's turn with no legal moves).
-            pass
+    @pytest.mark.parametrize("sfen", _MATES)
+    def test_checkmate_is_loss_for_stm(self, sfen):
+        """Zero legal moves returns Terminal.LOSS_FOR_STM with value 0 (Req 8.5)."""
+        board = self._board(sfen)
+        assert list(board.legal_moves) == [], "fixture must be a real mate"
+        assert board.is_check()
 
-        # Use a definitive checkmate position:
-        # White king on 1a (sq=0), Black gold on 1b (sq=1), Black gold on 2a (sq=9)
-        # White to move with no escapes
-        mate_sfen = "KG7/G8/9/9/9/9/9/9/8k w - 1"
-        board.set_sfen(mate_sfen)
-        moves = list(board.legal_moves)
-        if len(moves) == 0:
-            result = check_terminal(board)
-            assert result.terminal == Terminal.LOSS_FOR_STM
-            assert result.value == 0.0
-            return
-
-        # Try another known checkmate: Black has two Golds flanking the king
-        # 9i=White King, 8i=Black Gold, 9h=Black Gold -> king on 9a mated
-        mate_sfen2 = "k1G6/G8/9/9/9/9/9/9/8K w - 1"
-        board.set_sfen(mate_sfen2)
-        moves = list(board.legal_moves)
-        if len(moves) == 0:
-            result = check_terminal(board)
-            assert result.terminal == Terminal.LOSS_FOR_STM
-            assert result.value == 0.0
-            return
-
-        # Definitive approach: find a real mate by trying multiple positions
-        # Simple back-rank mate: White king at 1a, Black rook at 2a giving check,
-        # Black lance on 1b blocking escape
-        for candidate_sfen in [
-            "k8/L8/R8/9/9/9/9/9/8K w - 1",
-            "k8/LR7/9/9/9/9/9/9/8K w - 1",
-            # Attempt: king cornered by rook + gold
-            "k8/GR7/9/9/9/9/9/9/8K w - 1",
-        ]:
-            board.set_sfen(candidate_sfen)
-            if not list(board.legal_moves):
-                result = check_terminal(board)
-                assert result.terminal == Terminal.LOSS_FOR_STM
-                assert result.value == 0.0
-                return
-
-        # If none of the above work, construct via move sequence
-        # Standard tsume: drop gold adjacent to king in corner
-        board = cshogi.Board()
-        board.set_sfen("k8/9/9/9/9/9/9/9/8K b G2r2b3g4s4n4l18p 1")
-        # Black drops gold to 1b (sq 1) -- should be mate for White
-        # Actually let's just assert what we know works reliably
-        # A well-known tsume: atama-kin (headbutt gold)
-        board.set_sfen("k8/9/9/9/9/9/9/9/8K b G2r2b4s4n4l18p 1")
-        for m in board.legal_moves:
-            board.push(m)
-            if not list(board.legal_moves):
-                result = check_terminal(board)
-                assert result.terminal == Terminal.LOSS_FOR_STM
-                assert result.value == 0.0
-                return
-            board.pop()
-
-        pytest.skip("Could not construct a checkmate position in this environment")
+        result = check_terminal(board)
+        assert result.terminal == Terminal.LOSS_FOR_STM
+        assert result.value == 0.0
 
     def test_normal_position_is_not_terminal(self):
         """Normal positions return Terminal.NONE with value None (Req 8.10)."""
@@ -338,72 +298,56 @@ class TestTerminalStates:
         assert result.value is None
 
     def test_declaration_win_is_win_for_stm(self):
-        """WCSC declaration win returns Terminal.WIN_FOR_STM with value 1 (Req 8.6).
+        """All six WCSC declaration conditions -> WIN_FOR_STM, value 1 (Req 8.6)."""
+        board = self._board(self._DECL_BASE)
+        assert wcsc_declaration_win(board), "fixture must satisfy every condition"
+        assert board.is_nyugyoku()  # cshogi agrees, so check_terminal logs no disagreement
 
-        We construct a position that meets all 6 WCSC declaration conditions:
-        1. Declaring side's turn
-        2. King in opponent's three ranks
-        3. Not in check
-        4. >= 10 non-king pieces in opponent's three ranks
-        5. Points >= 28 (Black) or 27 (White)
-        6. Time remaining (always true)
-        """
-        # Construct a Black declaration win position:
-        # Black king in ranks 1-3, >= 10 Black pieces in ranks 1-3, points >= 28
-        # Use a custom SFEN with many promoted pieces in White's territory
-        # Black King on 5a (rank 1), plus 10+ Black pieces in ranks 1-3
-        # Need: 10 small pieces = 10 pts + hand pieces to reach 28
-        # Or: 2 big pieces (10 pts) + 8 small (8 pts) = 18 + hand to reach 28
-        # Simpler: 4 rooks/bishops (20 pts) + 8 small (8 pts) = 28
+        result = check_terminal(board)
+        assert result.terminal == Terminal.WIN_FOR_STM
+        assert result.value == 1.0
 
-        # Construct SFEN with Black's pieces arranged for nyugyoku
-        # Black: King on 5a, Rook on 1a, Rook on 9a, Bishop on 2a, Bishop on 8a,
-        # and Golds/Silvers filling the first three ranks
-        sfen = (
-            "RBKBR4/"  # rank 1: R,B,K,B,R on 9a-5a (all Black pieces)
-            "GSGSG4/"  # rank 2: G,S,G,S,G on 9b-5b
-            "GSGSG4/"  # rank 3: G,S,G,S,G on 9c-5c
-            "9/"
-            "9/"
-            "9/"
-            "9/"
-            "9/"
-            "4k4 b - 1"  # White king somewhere safe
-        )
-        board = cshogi.Board()
-        board.set_sfen(sfen)
+    # Each case below differs from a passing control by exactly one condition,
+    # so only the named boundary decides the outcome.
 
-        # Verify this meets declaration win conditions
-        if wcsc_declaration_win(board):
-            result = check_terminal(board)
-            assert result.terminal == Terminal.WIN_FOR_STM
-            assert result.value == 1.0
-        else:
-            # If our constructed SFEN doesn't satisfy the conditions,
-            # we try a programmatic approach
-            pytest.skip(
-                "Constructed SFEN did not satisfy all declaration-win conditions"
-            )
+    def test_declaration_win_at_exact_limits(self):
+        """Control: exactly 10 pieces and exactly 28 points (Black) passes."""
+        assert wcsc_declaration_win(self._board(self._DECL_AT_LIMIT))
 
     def test_declaration_win_boundary_below_10_pieces(self):
-        """Position with exactly 9 non-king pieces in territory -> NOT declaration win."""
-        # With only 9 pieces, condition 4 fails
-        board = cshogi.Board()
-        # Use initial position (king not in territory anyway)
+        """9 non-king pieces in territory, 28 points -> NOT a declaration win."""
+        board = self._board("RBKBR4/GSGSG4/9/9/9/9/9/9/4k4 b 3P 1")
+        assert not wcsc_declaration_win(board)
+        assert not board.is_nyugyoku()
+
+    def test_declaration_win_black_needs_28_points(self):
+        """10 pieces, 27 points (Black) -> NOT a declaration win."""
+        board = self._board("RBKBR4/GSGSG4/G8/9/9/9/9/9/4k4 b P 1")
         assert not wcsc_declaration_win(board)
 
+    def test_declaration_win_white_threshold_is_27_points(self):
+        """White: 27 points passes, 26 points fails (Black needs 28)."""
+        assert wcsc_declaration_win(
+            self._board("4K4/9/9/9/9/9/gsgsg4/g8/rbkbr4 w p 1")
+        )
+        assert not wcsc_declaration_win(
+            self._board("4K4/9/9/9/9/9/gsgsg4/g8/rbkbr4 w - 1")
+        )
+
     def test_declaration_win_requires_king_in_territory(self):
-        """King outside opponent's three ranks -> NOT declaration win."""
-        board = cshogi.Board()  # King on 5i (rank 9), not in White territory
+        """King outside the opponent's three ranks -> NOT a declaration win."""
+        board = self._board("RB1BR4/GSGSG4/GSGSG4/2K6/9/9/9/9/4k4 b - 1")
         assert not wcsc_declaration_win(board)
 
     def test_declaration_win_fails_when_in_check(self):
-        """Position in check -> NOT declaration win even if other conditions met."""
-        # Being in check violates condition 3
-        board = cshogi.Board()
-        # Initial position isn't in check, but king isn't in territory either
-        # Both conditions fail so this just confirms the function returns False
-        assert not wcsc_declaration_win(board)
+        """In check -> NOT a declaration win, though every other condition holds."""
+        control = self._board("RBKBR4/GS1SG4/GS1SG4/9/9/9/9/9/4k4 b - 1")
+        assert wcsc_declaration_win(control)
+
+        # Same position plus a White rook on 7i, giving check down the open 7 file.
+        in_check = self._board("RBKBR4/GS1SG4/GS1SG4/9/9/9/9/9/2r1k4 b - 1")
+        assert in_check.is_check()
+        assert not wcsc_declaration_win(in_check)
 
 
 @given(st.sampled_from([
