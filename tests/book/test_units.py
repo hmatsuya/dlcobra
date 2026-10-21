@@ -656,6 +656,23 @@ class TestSearchCommandArgs:
         assert args.model == "m.onnx"
         assert args.gpu_count == 1
 
+    @pytest.mark.parametrize("bad", ["0", "-2", "abc", "1.5"])
+    def test_gpu_count_below_one_or_non_integer_is_rejected(self, bad, capsys):
+        """13.10 -- 'an integer of at least 1': 0 and negatives used to be accepted
+        and silently ran the single-process path (F-15)."""
+        with pytest.raises(SystemExit) as exc:
+            self._parser().parse_args(
+                ["search", "--config", "c.yaml", "--model", "m.onnx", "--gpu-count", bad]
+            )
+        assert exc.value.code == 2
+        assert "--gpu-count" in capsys.readouterr().err
+
+    def test_gpu_count_one_is_accepted(self):
+        args = self._parser().parse_args(
+            ["search", "--config", "c.yaml", "--model", "m.onnx", "--gpu-count", "1"]
+        )
+        assert args.gpu_count == 1
+
     def test_gpu_count_explicit(self):
         args = self._parser().parse_args(
             [

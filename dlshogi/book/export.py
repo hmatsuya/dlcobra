@@ -74,7 +74,6 @@ class ExportCounts:
     apery_records: int = 0
     yaneuraou_entries: int = 0
     excluded_edges: int = 0
-    apery_key_multi_node: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -443,7 +442,12 @@ async def _batch_child_lookup(
     try:
         child_keys = position_keys_after(sfen, moves16_arr)
     except Exception:
-        # If position_keys_after fails (e.g. invalid sfen), return empty.
+        # Every edge of this node is then excluded and counted in
+        # excluded_edges, so say which node it was (F-15).
+        _LOG.warning(
+            "export: could not derive child keys for %r; excluding its %d edge(s)",
+            sfen, len(move16_list), exc_info=True,
+        )
         return {}
 
     # Build query parameters: lists of key_hi, key_lo pairs.

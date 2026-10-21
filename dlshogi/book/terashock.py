@@ -106,11 +106,14 @@ class ImportStats:
     ``terashock_entry``. ``duplicate_count`` is the number of parsed entries
     whose Position_Key collided with an earlier entry (last wins).
     ``rejected_line_count`` is the number of lines the parser rejected.
+    ``unindexable_count`` is the number of parsed entries whose SFEN has no
+    Position_Key and were therefore not stored.
     """
 
     entry_count: int
     duplicate_count: int
     rejected_line_count: int
+    unindexable_count: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -319,19 +322,30 @@ async def import_terashock(
 
     # -- Step 3: Prepare records for bulk load --
     records: list[tuple[int, int, str, bytes]] = []
+    unindexable: list[str] = []
     for entry in book.entries:
         try:
             pk = position_key_from_sfen(entry.sfen)
         except Exception:
-            # position_key_from_sfen may fail on malformed SFENs that
-            # cppshogi cannot parse. Skip silently -- these entries
-            # effectively have no Position_Key and cannot be indexed.
-            _LOG.debug("Skipping entry with unparseable SFEN: %s", entry.sfen[:80])
+            pk = None
+        # The binding does not raise on an SFEN it cannot parse: it returns the
+        # all-zero key, which no real position has (side-to-move bit or board
+        # key is always set). Indexing it would file every such entry under one
+        # key, last one winning, and count the rest as duplicates (F-15).
+        if pk is None or (pk.hi == 0 and pk.lo == 0):
+            unindexable.append(entry.sfen)
             continue
         key_hi = fold_u64_to_i64(pk.hi)
         key_lo = fold_u64_to_i64(pk.lo)
         moves_blob = pack_terashock_moves(entry.moves)
         records.append((key_hi, key_lo, entry.sfen, moves_blob))
+
+    if unindexable:
+        _LOG.warning(
+            "Terashock_Book: %d of %d entries have an SFEN with no Position_Key and "
+            "were not indexed (first: %r)",
+            len(unindexable), len(book.entries), unindexable[0][:80],
+        )
 
     if len(records) == 0:
         _LOG.error(
@@ -423,11 +437,14 @@ async def import_terashock(
         entry_count=unique_count,
         duplicate_count=duplicate_count,
         rejected_line_count=len(rejected_lines),
+        unindexable_count=len(unindexable),
     )
 
     _LOG.info(
-        "import-terashock complete: %d entries, %d duplicates, %d rejected lines",
+        "import-terashock complete: %d entries, %d duplicates, %d rejected lines, "
+        "%d unindexable",
         stats.entry_count, stats.duplicate_count, stats.rejected_line_count,
+        stats.unindexable_count,
     )
 
     return stats

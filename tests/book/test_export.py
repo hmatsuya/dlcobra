@@ -24,7 +24,7 @@ import cshogi
 import numpy as np
 import pytest
 
-from dlshogi.book.export import _compute_score, _apery_sort_key, ExportCounts
+from dlshogi.book.export import _compute_score, _apery_sort_key, _batch_child_lookup, ExportCounts
 from dlshogi.book.keys import POSITION_KEY, PositionKey
 
 pytestmark = [pytest.mark.db, pytest.mark.asyncio]
@@ -96,7 +96,6 @@ class TestProperty36ExportRecordMapping:
         assert counts.apery_records == 0
         assert counts.yaneuraou_entries == 0
         assert counts.excluded_edges == 0
-        assert counts.apery_key_multi_node == 0
 
 
 # ---------------------------------------------------------------------------
@@ -346,3 +345,26 @@ class TestProperty39ExportedMovesLegal:
             board_check = cshogi.Board(sfen)
             # Verify the move is legal by checking it's in the legal set
             assert m16 in legal_move16s
+
+
+# ---------------------------------------------------------------------------
+# F-15: a failed child-key derivation must not silently drop a whole node
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_batch_child_lookup_logs_when_child_keys_cannot_be_derived(monkeypatch, caplog):
+    import logging
+
+    from dlshogi.book import keys
+
+    def boom(sfen, moves16):
+        raise RuntimeError("cannot derive keys")
+
+    monkeypatch.setattr(keys, "position_keys_after", boom)
+    with caplog.at_level(logging.WARNING, logger="dlshogi.book.export"):
+        result = await _batch_child_lookup(None, "some sfen", [1, 2, 3], 7)
+
+    assert result == {}  # unchanged: every edge of the node is excluded and counted
+    messages = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("some sfen" in m and "3 edge" in m for m in messages), messages

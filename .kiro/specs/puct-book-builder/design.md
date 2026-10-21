@@ -940,7 +940,6 @@ class ExportCounts:
     apery_records: int
     yaneuraou_entries: int
     excluded_edges: int
-    apery_key_multi_node: int
 
 async def export_book(store: NodeStore, cfg: BookConfig,
                       apery_out: Path | None,

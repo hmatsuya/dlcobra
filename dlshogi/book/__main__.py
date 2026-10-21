@@ -39,6 +39,17 @@ _SHUTDOWN_BUDGET_S = 60.0
 # ---------------------------------------------------------------------------
 
 
+def _positive_int(text: str) -> int:
+    """argparse type for Requirement 13.10's 'an integer of at least 1'."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid int value: {text!r}") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level argparse parser with its subcommands."""
     parser = argparse.ArgumentParser(
@@ -56,8 +67,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the YAML configuration file.",
     )
     search_parser.add_argument(
-        "--gpu-count", type=int, default=1,
-        help="Number of GPU processes to spawn (default: 1).",
+        "--gpu-count", type=_positive_int, default=1,
+        help="Number of GPU processes to spawn, at least 1 (default: 1).",
     )
     search_parser.add_argument(
         "--model", type=str, required=True,
@@ -729,11 +740,10 @@ async def _export_async(
 
     _LOG.info(
         "Export complete: apery_records=%d, yaneuraou_entries=%d, "
-        "excluded_edges=%d, apery_key_multi_node=%d",
+        "excluded_edges=%d",
         counts.apery_records,
         counts.yaneuraou_entries,
         counts.excluded_edges,
-        counts.apery_key_multi_node,
     )
     return 0
 
