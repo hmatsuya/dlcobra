@@ -113,6 +113,9 @@ _RETRY_MAX_WAIT_S = 60.0
 # (compare _SCHEMA_CREATION_TIMEOUT_S, _CONNECT_ATTEMPT_TIMEOUT_S above).
 _FLUSH_INTERVAL_S = 0.2
 
+# get() re-reads when a flush commit overlapped its SELECT; see get().
+_GET_CONSISTENT_ATTEMPTS = 8
+
 # Requirement 15.4: resident memory sampled at intervals of at most 10 s.
 _RSS_SAMPLE_INTERVAL_S = 10.0
 
@@ -796,6 +799,16 @@ class NodeStore:
         # have a row, which is a real anomaly (F-14).
         self.rowless_leaf_deltas = 0
         self.rowless_deltas_dropped = 0
+        # Snapshots flush() is writing right now, keyed by id(): between the
+        # swap out of _pending_backup and the commit a delta lives only here,
+        # and get() must still show it (R4.5). _commits_in_flight/_flush_epoch
+        # let get() discard a SELECT that overlapped a flush commit, because
+        # it cannot tell whether that SELECT saw the committed row (F-20).
+        self._flushing: dict[int, dict[PositionKey, BackupDelta]] = {}
+        self._commits_in_flight = 0
+        self._flush_epoch = 0
+        self._commit_idle = asyncio.Event()
+        self._commit_idle.set()
 
         # -- task 9.2: backend selection for the backup patch path ---------
         # Defaults to False (the fallback path) until _detect_puct_edge_
@@ -1339,14 +1352,9 @@ class NodeStore:
         start = time.monotonic()
         cached = self._cache.get(key)
         if cached is not None:
-            view = _apply_pending_to_view(cached, self._pending_backup.get(key))
+            view = self._overlay_unflushed(cached, key)
             self._read_latency.record(time.monotonic() - start)
             return GetResult.FOUND, view
-
-        # Requirement 4.5: uncommitted deltas merged by `backup()` but not
-        # yet flushed must be visible on read. Consulted here, between the
-        # LRU check above and the PostgreSQL query below.
-        pending = self._pending_backup.get(key)
 
         key_hi = fold_u64_to_i64(key.hi)
         key_lo = fold_u64_to_i64(key.lo)
@@ -1361,11 +1369,29 @@ class NodeStore:
                     key_lo,
                 )
 
-        try:
-            row = await self._run(_do_get)
-        except Exception as exc:  # noqa: BLE001 - see docstring: FAILED is a real return value
-            _LOG.error("Node_Store.get(%r) failed: %r", key, exc)
-            return GetResult.FAILED, None
+        # A SELECT that overlaps a flush commit may or may not have seen the
+        # committed delta, and that delta is in the flush snapshot until the
+        # commit is acknowledged: overlaying it could double count, not
+        # overlaying it could lose it. Wait for the commit to finish and read
+        # again (F-20). Flushes run every 200 ms and a commit takes
+        # milliseconds, so one retry is the norm; the bound only keeps a
+        # pathological schedule from spinning forever.
+        for _ in range(_GET_CONSISTENT_ATTEMPTS):
+            await self._commit_idle.wait()
+            epoch = self._flush_epoch
+            try:
+                row = await self._run(_do_get)
+            except Exception as exc:  # noqa: BLE001 - see docstring: FAILED is a real return value
+                _LOG.error("Node_Store.get(%r) failed: %r", key, exc)
+                return GetResult.FAILED, None
+            if self._flush_epoch == epoch and not self._commits_in_flight:
+                break
+        else:
+            _LOG.warning(
+                "Node_Store.get(%r): reads kept overlapping flush commits; "
+                "returning the last read (visit counts may be off by one flush)",
+                key,
+            )
 
         if row is None:
             self._read_latency.record(time.monotonic() - start)
@@ -1373,9 +1399,15 @@ class NodeStore:
 
         view = _row_to_view(row)
         self._cache.put(key, view)
-        view = _apply_pending_to_view(view, pending)
+        view = self._overlay_unflushed(view, key)
         self._read_latency.record(time.monotonic() - start)
         return GetResult.FOUND, view
+
+    def _overlay_unflushed(self, view: BookNodeView, key: PositionKey) -> BookNodeView:
+        """Overlay every delta not yet committed: the flush snapshots, then pending (R4.5)."""
+        for snapshot in self._flushing.values():
+            view = _apply_pending_to_view(view, snapshot.get(key))
+        return _apply_pending_to_view(view, self._pending_backup.get(key))
 
     async def get_many(self, keys: Sequence[PositionKey]) -> list[Optional[BookNodeView]]:
         """Batched `get`, one statement over every key in ``keys``.
@@ -1698,6 +1730,8 @@ class NodeStore:
         if not snapshot:
             return
 
+        self._flushing[id(snapshot)] = snapshot
+        committing = False
         start = time.monotonic()
 
         apply_row = (
@@ -1707,10 +1741,16 @@ class NodeStore:
         )
 
         async def _do_flush(pool: asyncpg.Pool) -> None:
+            nonlocal committing
             async with pool.acquire() as conn:
                 async with conn.transaction():
                     for delta in snapshot.values():
                         await apply_row(conn, delta)
+                    # Last statement before the context manager sends COMMIT.
+                    committing = True
+                    self._commits_in_flight += 1
+                    self._flush_epoch += 1
+                    self._commit_idle.clear()
 
         try:
             await self._run(_do_flush)
@@ -1722,10 +1762,25 @@ class NodeStore:
             # meantime. This is consistent with Requirement 2.9: a
             # connection loss suspends operations and resumes them, it
             # does not discard already-backed-up-in-memory deltas.
+            self._finish_flush(snapshot, committing)
             self.backup(list(snapshot.values()))
             self._write_latency.record(time.monotonic() - start)
             raise
+        # Committed. Cached rows predate it, so drop them in the same
+        # synchronous step that retires the snapshot.
+        self._finish_flush(snapshot, committing)
+        for key in snapshot:
+            self._cache.invalidate(key)
         self._write_latency.record(time.monotonic() - start)
+
+    def _finish_flush(self, snapshot: dict[PositionKey, BackupDelta], committing: bool) -> None:
+        """Retire ``snapshot`` and reopen reads. Synchronous: no await inside (F-20)."""
+        del self._flushing[id(snapshot)]
+        if committing:
+            self._commits_in_flight -= 1
+            self._flush_epoch += 1
+            if not self._commits_in_flight:
+                self._commit_idle.set()
 
     def _note_rowless_delta(self, delta: BackupDelta) -> None:
         """Account for a backup delta whose book_node row does not exist.
@@ -1803,12 +1858,6 @@ class NodeStore:
             delta.flags_or,
             edges_blob,
         )
-        # The row this flush just wrote may be cached; invalidate so the
-        # next get() re-reads the committed row rather than serving a
-        # stale cached copy now that the pending overlay for this key has
-        # been cleared (the snapshot dict backup() built this delta from
-        # was already swapped out before flush() started applying it).
-        self._cache.invalidate(delta.key)
 
     async def _apply_backup_row_extension(
         self, conn: asyncpg.Connection, delta: BackupDelta
@@ -1882,10 +1931,6 @@ class NodeStore:
         if status.rsplit(" ", 1)[-1] == "0":
             self._note_rowless_delta(delta)
             return
-
-        # Same invalidation as the fallback path (see its docstring):
-        # a stale cached view must not be served after this flush.
-        self._cache.invalidate(delta.key)
 
     # -- flusher lifecycle (task 8.6): 200 ms interval, and on stop -------
 
