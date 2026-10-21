@@ -39,7 +39,7 @@ import asyncpg
 import cshogi
 import numpy as np
 
-from dlshogi.book.book_db import BookDBPrinter, TerashockEntry, TerashockMove
+from dlshogi.book.book_db import EVAL_MAX, EVAL_MIN, BookDBPrinter, TerashockEntry, TerashockMove
 from dlshogi.book.keys import fold_u64_to_i64, unfold_i64_to_u64
 from dlshogi.book.packed_edge import PACKED_EDGE, decode_edges
 
@@ -363,7 +363,9 @@ async def _phase1_generate_runs(
                                 TerashockMove(
                                     move16=move16_val,
                                     reply16=None,  # No reply in export context
-                                    eval=score,  # Use the computed score as eval
+                                    # Apery keeps the int32 score (R12.6); the .db copy must
+                                    # fit R6.2's parser range and the int16 field (F-10).
+                                    eval=max(EVAL_MIN, min(EVAL_MAX, score)),
                                     depth=ts_depth if has_terashock else 0,
                                     count=visit_count,
                                 )
