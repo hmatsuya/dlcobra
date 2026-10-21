@@ -407,218 +407,32 @@ class RepetitionResolver:
         # Use the first four occurrences for the check-history scan.
         four_indices = indices[:4]
 
-        # "The moving side delivered check at all four occurrences" means:
-        # at each of the four positions where this key appears, was the
-        # side to move at that position in check? Since the key encodes
-        # the side to move and the position, "the moving side delivered
-        # check" means the *opponent* of the side to move is delivering
-        # check, which is what board.is_check() reports (it reports
-        # whether the *current* side to move's king is in check, i.e.
-        # whether the side that just moved delivered check).
+        # Who gave check (Requirements 8.1, 8.3, 8.4, 8.9). The side to move
+        # is the same at all four occurrences (it is part of the key); call
+        # it the mover. Positions alternate between the mover's turn and the
+        # opponent's turn, and is_in_check at a ply says whether the side
+        # that just moved gave check to the side now to move:
         #
-        # Wait -- design.md says: "the moving side delivered check at all
-        # four occurrences" is answered by scanning board.is_check() at
-        # each ply. board.is_check() after a push tells whether the side
-        # to move (the one whose turn it now is) is in check -- meaning
-        # the side that just moved (the "moving side" that made the last
-        # move to reach this position) delivered check.
+        #   offset from first_idx    turn       is_in_check means
+        #   0, 2, 4, ...             mover      the opponent gave check
+        #   1, 3, 5, ...             opponent   the mover gave check
         #
-        # So: is_in_check at an index means "the side that moved INTO
-        # this position delivered check to the now-to-move side".
-        #
-        # The "moving side" in the truth table refers to the side whose
-        # turn it is at the REPEATED position (who will next make a move
-        # from there). At a repetition, the side to move is the same at
-        # all four occurrences (because side-to-move is part of
-        # Position_Key).
-        #
-        # "The moving side delivered check at all four occurrences" means:
-        # at each of those four positions, did the side-to-move (the
-        # "mover") deliver check? The mover delivers check by playing a
-        # checking move -- that check would show up at the NEXT ply
-        # (the position after the mover's move). So we look at the ply
-        # *after* each occurrence.
-        #
-        # Actually, re-reading the design more carefully:
-        # "did one side deliver check at all four occurrences?" -- the
-        # occurrences are the positions themselves. At each occurrence,
-        # is_in_check tells us if the mover (side to move at that
-        # position) is being checked (by the opponent's last move).
-        #
-        # In shogi repetition rules:
-        # - "Moving side is giving perpetual check" = the mover's moves
-        #   from that position result in check. Since we're at the same
-        #   position four times and the mover keeps giving check to reach
-        #   the next occurrence.
-        #
-        # The standard interpretation: look at the positions BETWEEN the
-        # four occurrences. If at every ply between the first and fourth
-        # occurrence, the mover (the side to move at the repeated
-        # position) delivered check, then it's perpetual check by the
-        # mover.
-        #
-        # Per design.md: "Each task records board.is_check() at every ply
-        # on the path, so 'the moving side delivered check at all four
-        # occurrences' is a scan of that list between the first and
-        # fourth occurrence indices."
-        #
-        # The "moving side" is the side to move at the repeated position.
-        # Between the four occurrences, plies alternate. The mover
-        # delivers check when, after the mover's move, the opponent is
-        # in check -- which is the is_in_check at the ply right after
-        # each of the mover's moves.
-        #
-        # More precisely: at each occurrence index i, the side to move is
-        # the "mover". The mover then plays a move, leading to position
-        # at index i+1 (if it exists). If is_in_check at i+1 is True,
-        # the mover delivered check.
-        #
-        # So "mover checked at all four occurrences" means: for each of
-        # the first three occurrences (the fourth has no subsequent move
-        # within the repetition), the ply right after has is_in_check
-        # == True. For the fourth occurrence itself, the mover just
-        # arrived at the position that completes the repetition -- the
-        # mover's check status for the fourth occurrence is whether they
-        # delivered check to reach it, which is the is_in_check at the
-        # fourth occurrence itself (the opponent moved to create this
-        # position, and if is_in_check is True, the opponent delivered
-        # check TO the mover).
-        #
-        # Actually, the simplest and standard interpretation in Japanese
-        # shogi rules: check if every move between the first and last
-        # occurrence (inclusive of the moves that created each occurrence)
-        # by a given side was a checking move.
-        #
-        # Let me use the standard approach:
-        # - "Side X gave check at all four occurrences" means that at
-        #   each of the four occurrence positions, the position was
-        #   reached by a checking move from side X.
-        # - is_in_check at a position = True means the side that moved
-        #   INTO that position gave check (to the current stm).
-        #
-        # At each occurrence, the side to move is the same (it's part of
-        # the key). Let's call that side "STM" (side to move). The side
-        # that moved into each occurrence is the opponent of STM.
-        #
-        # So "opponent checked at all four occurrences" =
-        #   is_in_check at all four occurrence indices.
-        # "mover checked at all four occurrences" =
-        #   is_in_check at the ply AFTER each of the first three
-        #   occurrences (i.e., after STM played from that position).
-        #   For the 4th occurrence there's no "after" within the cycle.
-        #
-        # Wait, but the standard shogi rule checks moves BETWEEN the
-        # occurrences, looking at ALL intervening plies, not just the
-        # ply immediately after each occurrence.
-        #
-        # The standard rule (千日手): "同一手順が繰り返された場合、
-        # 連続王手の千日手は王手をかけている側の負け"
-        # = If the same sequence repeats, perpetual check (continuous
-        # check by one side) makes the checking side lose.
-        #
-        # "Continuous check" means: between the positions that form the
-        # repetition, EVERY move by that side was a checking move.
-        #
-        # So between first and fourth occurrence, for every ply where
-        # it's the mover's turn to have just moved (i.e., odd-offset
-        # plies from each occurrence), is_in_check should be True.
-        #
-        # Simpler: between the first and fourth occurrence (inclusive),
-        # at every ply where the is_in_check field reflects a check
-        # delivered by the mover:
-        #   - Plies at odd offsets from the occurrence (the mover has
-        #     just played) -> is_in_check = mover gave check
-        #   - Plies at even offsets from the occurrence (the opponent
-        #     has just played) -> is_in_check = opponent gave check
-        #
-        # Design.md says "a scan of that list between the first and
-        # fourth occurrence indices" -- the key insight is that the
-        # position repeats every N plies in a cycle of length N.
-        #
-        # Let me implement the straightforward interpretation:
-        # Between first_idx and last_idx (the fourth occurrence),
-        # scan every ply. The plies alternate between mover-to-play
-        # and opponent-to-play. At a mover-to-play ply (same key parity
-        # as the repeated position), is_in_check means the opponent just
-        # gave check. At an opponent-to-play ply, is_in_check means the
-        # mover just gave check.
-        #
-        # "Mover checked at all four" = at every ply between first and
-        # fourth occurrence where it's the opponent's turn (the mover
-        # just moved), is_in_check is True.
-        #
-        # "Opponent checked at all four" = at every ply between first and
-        # fourth occurrence where it's the mover's turn (the opponent
-        # just moved), is_in_check is True.
-
+        # Perpetual check by a side = every one of its moves between the
+        # first and fourth occurrence was a check (the rule for sennichite
+        # by continuous check). design.md: "a scan of that list between the
+        # first and fourth occurrence indices".
         first_idx = four_indices[0]
         last_idx = four_indices[3]
 
-        # Determine which plies are "mover just moved" vs "opponent just
-        # moved". At the occurrence indices, it's the mover's turn (to
-        # play). So:
-        # - Even offset from first_idx (0, 2, 4, ...) = mover's turn
-        #   -> is_in_check here means opponent just gave check to mover
-        # - Odd offset from first_idx (1, 3, 5, ...) = opponent's turn
-        #   -> is_in_check here means mover just gave check to opponent
-
-        mover_gave_check_all = True  # Mover gave check continuously
-        opponent_gave_check_all = True  # Opponent gave check continuously
-
-        # Scan plies from first_idx+1 to last_idx (inclusive).
-        # At first_idx itself, we know it's a mover-turn ply; is_in_check
-        # there means the opponent checked the mover to reach that
-        # position.
-        #
-        # For "mover gave check": check all plies where opponent is to
-        # move (odd offsets from first_idx): first_idx+1, first_idx+3, ...
-        # For "opponent gave check": check all plies where mover is to
-        # move (even offsets from first_idx, excluding first_idx itself):
-        # first_idx+2, first_idx+4, ...
-        # Plus the is_in_check at occurrence indices themselves (even
-        # offsets) for opponent giving check.
-
-        # Actually the simplest correct approach based on Japanese rules:
-        # - Mover gives perpetual check if at EVERY position on the path
-        #   between first and fourth occurrence where the opponent is the
-        #   side to move, that position was reached by a checking move
-        #   (is_in_check is True).
-        # - Opponent gives perpetual check if at EVERY position on the
-        #   path between first and fourth occurrence where the mover is
-        #   the side to move, that position was reached by a checking
-        #   move (is_in_check is True).
-
-        # Plies from first_idx to last_idx:
-        # first_idx: mover's turn. is_in_check => opponent checked mover
-        # first_idx+1: opponent's turn. is_in_check => mover checked opp
-        # first_idx+2: mover's turn. is_in_check => opponent checked mover
-        # ...
-        # At even offset: mover's turn, is_in_check = opponent gave check
-        # At odd offset: opponent's turn, is_in_check = mover gave check
-
-        # "Mover checked at all four occurrences" in the shogi repetition
-        # rule context means: every move by the mover between the
-        # repetitions was a checking move. This is detected by: every
-        # odd-offset ply from first_idx has is_in_check == True.
-
-        # "Opponent checked at all four occurrences" means: every move by
-        # the opponent was a checking move. This is detected by: every
-        # even-offset ply from first_idx (the occurrence positions
-        # themselves) has is_in_check == True.
-
-        # Check mover's continuous check: all odd-offset plies
-        for i in range(first_idx + 1, last_idx + 1, 2):
-            if not self._path[i].is_in_check:
-                mover_gave_check_all = False
-                break
-
-        # Check opponent's continuous check: all even-offset plies
-        # (from first_idx itself -- if the mover is in check at ALL
-        # occurrences, the opponent gave continuous check)
-        for i in range(first_idx, last_idx + 1, 2):
-            if not self._path[i].is_in_check:
-                opponent_gave_check_all = False
-                break
+        # Mover gave check on every one of its moves: all odd offsets.
+        mover_gave_check_all = all(
+            self._path[i].is_in_check for i in range(first_idx + 1, last_idx + 1, 2)
+        )
+        # Opponent gave check on every one of its moves: all even offsets,
+        # starting at the first occurrence itself.
+        opponent_gave_check_all = all(
+            self._path[i].is_in_check for i in range(first_idx, last_idx + 1, 2)
+        )
 
         # Apply the truth table:
         # | mover_check | opponent_check | classification | value |
