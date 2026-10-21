@@ -539,9 +539,13 @@ class SearchCoordinator:
             # Cooperative shutdown (Requirement 10.6): re-raise after cleanup
             raise
         except EvaluatorBatchError:
-            # Requirement 5.6: batch failure, descent discarded
+            # Requirement 5.6: batch failure, descent discarded. Every request
+            # of the failed batch raises its own EvaluatorBatchError, so one
+            # event per descent is one per affected Board_State (R14.6).
             _LOG.debug("Worker %d: evaluator batch failed", worker_id)
             self.descents_failed += 1
+            if self._reporter is not None:
+                self._reporter.record_event("evaluator_failure")
         except Exception:
             _LOG.error(
                 "Worker %d: unexpected exception in descent",
@@ -726,6 +730,8 @@ class SearchCoordinator:
 
                     if not self._count_write(write_result, len(edges_data)):
                         return
+                    if write_result.outcome == WriteOutcome.COMMITTED:
+                        self._count_terashock(edges_data, ts_lookup)
 
                     # Leaf value is the evaluator's win rate
                     leaf_value = eval_result.win_rate
@@ -893,6 +899,26 @@ class SearchCoordinator:
         if view.eval_win_rate is not None:
             return True
         return False
+
+    def _count_terashock(
+        self, edges_data: list[dict[str, Any]], ts_lookup: Optional[TerashockLookupResult]
+    ) -> None:
+        """Report Terashock activity for a node this process just created.
+
+        R14.2 counts Book_Nodes whose expansion received at least one
+        Terashock_Move, and R7.4 counts each Terashock_Move that is not a legal
+        move of the position (it gets no edge: R7.6). Counted only for a
+        COMMITTED expansion, so a DUPLICATE (another worker created the node)
+        is not counted twice.
+        """
+        if self._reporter is None or ts_lookup is None:
+            return
+        edge_moves = {e["move16"] for e in edges_data}
+        illegal = sum(1 for m in ts_lookup.moves["move16"] if int(m) not in edge_moves)
+        for _ in range(illegal):
+            self._reporter.record_event("terashock_illegal_discard")
+        if any(e["flags"] & _FLAG_TERASHOCK_PRESENT for e in edges_data):
+            self._reporter.record_event("terashock_injection")
 
     def _count_write(self, write_result, n_edges: int) -> bool:
         """Count an insert_expansion outcome; False means the write FAILED."""
