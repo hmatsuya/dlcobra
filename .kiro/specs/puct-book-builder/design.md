@@ -1585,8 +1585,10 @@ streams through Book_DB_Printer. Requirement 6.6 needs the entry count on the *s
 phase 1 already knows exactly before phase 2 opens the output, so the header is written first and no
 rewind is needed. Within an entry, Terashock_Moves are ordered descending by evaluation value
 (Requirement 12.4). The fields of each entry are mapped from the record: `move` is the recorded
-move, `reply` is always the literal `none`, `eval` is the score computed in Requirement 12.4
-criterion 6, `depth` is the recorded Terashock search depth (0 when no Terashock evaluation is
+move, `reply` is always the literal `none`, `eval` is the score computed in Requirement 12.6
+clamped to [-32000, 32000], the evaluation range Requirement 6 criterion 2 gives the parser (the Apery
+`score` keeps its full int32 range; without the narrower clamp the exporter would write lines its own
+parser rejects), `depth` is the recorded Terashock search depth (0 when no Terashock evaluation is
 recorded), and `count` is the recorded visit count.
 
 ### Book_DB_Parser and Book_DB_Printer data model
@@ -2419,11 +2421,12 @@ positions with drop-only move sets; verification performed against a freshly re-
 *For any* Book_Graph, the Terashock_Entry records of the exported YaneuraOu `.db` file are
 non-decreasing under byte-wise comparison of their SFEN strings, there is exactly one entry per
 Book_Node with at least one exported Book_Edge, and within each entry the Terashock_Move records are
-non-increasing by evaluation value.
+non-increasing by evaluation value, and every evaluation value lies in [-32000, 32000].
 
 Strategy: graphs whose SFEN strings share long common prefixes, produced by taking one position and
 applying single-piece perturbations, so that byte-wise comparison is genuinely exercised; evaluation
-values from a small `st.sampled_from` set to force ties.
+values from a small `st.sampled_from` set to force ties, plus scores beyond the range (for example
+±2**31) so the clamp is exercised.
 
 **Validates: Requirements 12.4**
 
@@ -2977,7 +2980,7 @@ recognition and the range table's contents are configuration facts, not behaviou
 | 12.1 one BookEntry per exported edge | phase-1 emission into an `np.empty(N, dtype=cshogi.BookEntry)` buffer; Property 36 |
 | 12.2 ascending unsigned key order | `np.lexsort` with `key` read through the `<u8` field, plus the `bigint`-to-unsigned reinterpretation noted in *Schema*; k-way merge with `heapq.merge`; Property 37 |
 | 12.3 within-key total order | `np.lexsort` over (key asc, -score, -count, fromToPro asc) with `score` and `count` widened to int64 before negation; Property 37 |
-| 12.4 YaneuraOu ordering | external sort on `bytes` SFEN keys, which is Python's native byte-wise order; moves descending by eval; Property 40 |
+| 12.4 YaneuraOu ordering | external sort on `bytes` SFEN keys, which is Python's native byte-wise order; moves descending by eval; eval clamped to the parser range [-32000, 32000]; Property 40 |
 | 12.5 Export_Visit_Threshold | phase-1 filter; Property 38 |
 | 12.6 score from the child's propagated value | Eval_Coef conversion, parent perspective, int32 clamp; Property 36 |
 | 12.7 export legality | `board.move_from_move16` verified against `board.legal_moves`; Property 39 |
