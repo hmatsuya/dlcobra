@@ -1073,7 +1073,7 @@ async def test_set_propagation_writes_and_reads_back(pg_scratch_database, pg_con
         assert meta["propagation_done_seq"] == pass_id
 
         seq = await store.bump_search_write_seq()
-        assert seq == 1
+        assert seq == (await pg_conn.fetchval("SELECT propagation_seq FROM book_meta")) + 1
     finally:
         await store.close()
 

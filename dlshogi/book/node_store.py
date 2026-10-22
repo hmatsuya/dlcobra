@@ -2086,21 +2086,22 @@ class NodeStore:
         await self._run(_do_mark)
 
     async def bump_search_write_seq(self) -> int:
-        """Advance and return `book_meta.search_write_seq`.
+        """Mark the graph as written by search after the last propagation pass.
 
-        Incremented by the search side whenever it commits a write that
-        would make a previously completed propagation pass stale (an
-        expansion or a backup); a later export's staleness warning
-        (Requirement 12.9's "or `search_write_seq > propagation_done_seq`")
-        compares this against `propagation_done_seq`. No caller in this
-        task's scope invokes this yet; it is provided here purely as the
-        `book_meta` maintenance helper design.md's schema implies.
+        Sets `book_meta.search_write_seq` to ``propagation_seq + 1``: one more
+        than the id of the newest pass started, so the next pass to complete
+        sets `propagation_done_seq` to that value and clears the mark, while a
+        search run started after it sets the mark one higher again. Export's
+        stale-propagation warning (Requirement 12.8) fires on
+        `search_write_seq > propagation_done_seq`. Idempotent, so concurrent
+        search processes can all call it; ``SearchCoordinator.run`` does so
+        once, before its first write.
         """
 
         async def _do_bump(pool: asyncpg.Pool) -> int:
             async with pool.acquire() as conn:
                 return await conn.fetchval(
-                    "UPDATE book_meta SET search_write_seq = search_write_seq + 1 "
+                    "UPDATE book_meta SET search_write_seq = propagation_seq + 1 "
                     "WHERE id = 1 RETURNING search_write_seq"
                 )
 

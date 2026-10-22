@@ -408,6 +408,9 @@ class SearchCoordinator:
         next_worker_id = 0
 
         try:
+            # Tell export that search wrote after the last propagation pass (R12.8).
+            await self._store.bump_search_write_seq()
+
             # Persist backup deltas periodically instead of only at shutdown, so
             # a crash or a kill loses at most the last flush window of visit
             # counts (design.md, "In-process coalescing accumulator"; R10), and
