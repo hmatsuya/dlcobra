@@ -179,3 +179,47 @@ async def test_read_that_starts_during_the_commit_waits_for_it(pg_scratch_databa
         assert not selects_during_commit, "a SELECT was issued while the commit was in flight"
     finally:
         await store.close()
+
+
+async def test_cancelled_flush_reopens_the_commit_gate(pg_scratch_database, pg_conn, monkeypatch):
+    """A flush cancelled between raising the gate and the COMMIT must not strand readers.
+
+    CancelledError is a BaseException; catching only Exception left
+    _commits_in_flight raised and _commit_idle cleared forever, so every later
+    cache-missing get() hung.
+    """
+    import asyncpg.transaction as tx
+
+    store, m16, base = await _store(pg_scratch_database, pg_conn)
+    try:
+        real_exit = tx.Transaction.__aexit__
+
+        async def slow_exit(self, *exc):
+            await asyncio.sleep(0.5)  # the COMMIT has not been sent yet
+            return await real_exit(self, *exc)
+
+        monkeypatch.setattr(tx.Transaction, "__aexit__", slow_exit)
+        store.backup([_delta(m16)])
+        flush = asyncio.ensure_future(store.flush())
+        for _ in range(400):
+            if store._commits_in_flight:
+                break
+            await asyncio.sleep(0.005)
+        assert store._commits_in_flight == 1
+
+        flush.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await flush
+        monkeypatch.setattr(tx.Transaction, "__aexit__", real_exit)
+
+        assert store._commits_in_flight == 0
+        assert store._commit_idle.is_set()
+        assert store._flushing == {}
+        # The transaction rolled back, so the delta must be back in pending and
+        # shown exactly once, and the read must not hang.
+        assert await asyncio.wait_for(_visits(store), 3) == base + _N
+        await store.flush()
+        store._cache.invalidate(_ROOT)
+        assert await asyncio.wait_for(_visits(store), 3) == base + _N
+    finally:
+        await store.close()

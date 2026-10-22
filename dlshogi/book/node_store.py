@@ -1775,7 +1775,14 @@ class NodeStore:
 
         try:
             await self._run(_do_flush)
-        except Exception:
+        except BaseException:
+            # BaseException, not Exception: a cancelled flush (shutdown, a
+            # wait_for expiring) must reopen the commit gate too, or every
+            # later cache-missing get() waits on _commit_idle forever.
+            # Known limit: a cancellation that lands after the server applied
+            # COMMIT re-merges a delta that is already stored, so the next
+            # flush applies it twice. Not distinguishable client-side; it is
+            # the same case as a COMMIT that fails with a connection error.
             # A failed flush re-merges the snapshot back into the live
             # accumulator (rather than silently dropping it), so the next
             # flush attempt retries the same deltas; get() continues to
