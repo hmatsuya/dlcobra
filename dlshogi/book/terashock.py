@@ -26,11 +26,9 @@ note that a lookup happens only on the *first* expansion of a node, so the
 query rate equals the expansion rate, not the descent rate (design.md's
 "In PostgreSQL, not in memory" section).
 
-**Progress_Reporter integration.** ``report.py`` (task 16.1) does not
-exist yet, so ``import_terashock`` uses ``logging`` for progress/error
-reporting and returns an ``ImportStats`` dataclass for the caller to
-inspect. The eventual ``Progress_Reporter`` need only read these same
-stats.
+**Progress_Reporter integration.** ``import_terashock`` uses ``logging`` for
+progress/error reporting and returns an ``ImportStats`` dataclass for the
+caller to inspect; it runs before the search, so no reporter is involved.
 """
 
 from __future__ import annotations
@@ -322,7 +320,8 @@ async def import_terashock(
 
     # -- Step 3: Prepare records for bulk load --
     records: list[tuple[int, int, str, bytes]] = []
-    unindexable: list[str] = []
+    unindexable_count = 0
+    first_unindexable: Optional[str] = None
     for entry in book.entries:
         try:
             pk = position_key_from_sfen(entry.sfen)
@@ -333,18 +332,20 @@ async def import_terashock(
         # key is always set). Indexing it would file every such entry under one
         # key, last one winning, and count the rest as duplicates (F-15).
         if pk is None or (pk.hi == 0 and pk.lo == 0):
-            unindexable.append(entry.sfen)
+            unindexable_count += 1
+            if first_unindexable is None:
+                first_unindexable = entry.sfen
             continue
         key_hi = fold_u64_to_i64(pk.hi)
         key_lo = fold_u64_to_i64(pk.lo)
         moves_blob = pack_terashock_moves(entry.moves)
         records.append((key_hi, key_lo, entry.sfen, moves_blob))
 
-    if unindexable:
+    if unindexable_count:
         _LOG.warning(
             "Terashock_Book: %d of %d entries have an SFEN with no Position_Key and "
             "were not indexed (first: %r)",
-            len(unindexable), len(book.entries), unindexable[0][:80],
+            unindexable_count, len(book.entries), (first_unindexable or "")[:80],
         )
 
     if len(records) == 0:
@@ -437,7 +438,7 @@ async def import_terashock(
         entry_count=unique_count,
         duplicate_count=duplicate_count,
         rejected_line_count=len(rejected_lines),
-        unindexable_count=len(unindexable),
+        unindexable_count=unindexable_count,
     )
 
     _LOG.info(
@@ -476,7 +477,7 @@ class TerashockIndex:
         self._cache: OrderedDict[PositionKey, TerashockLookupResult] = OrderedDict()
         self._cache_bytes = 0
 
-        # Counters for future Progress_Reporter (task 16.1).
+        # Lookup counters; nothing in production reads them.
         self.hits = 0
         self.misses = 0
         self.queries = 0

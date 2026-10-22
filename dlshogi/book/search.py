@@ -371,6 +371,10 @@ class SearchCoordinator:
         self.expansions_collision = 0
         self.expansions_failed = 0
         self.forced_shutdown = False
+        # Set when the last flush failed: the run's final window of visit counts
+        # is then not in the database, so the entry points exit non-zero and
+        # run.sh does not go on to export from an incomplete graph.
+        self.final_flush_failed = False
 
     # -- public entry point ------------------------------------------------
 
@@ -404,6 +408,15 @@ class SearchCoordinator:
         next_worker_id = 0
 
         try:
+            # Persist backup deltas periodically instead of only at shutdown, so
+            # a crash or a kill loses at most the last flush window of visit
+            # counts (design.md, "In-process coalescing accumulator"; R10), and
+            # keep RSS within R15.4's bound. Started inside the try so that a
+            # cancellation or error right here still reaches the finally, which
+            # stops both (the stop_* calls are no-ops when nothing started).
+            self._store.start_flusher()
+            self._store.start_rss_sampler()
+
             # Launch initial Worker_Count tasks
             for _ in range(worker_count):
                 if self._stop_requested:
@@ -463,13 +476,22 @@ class SearchCoordinator:
                     await asyncio.gather(*tasks.keys(), return_exceptions=True)
 
         finally:
-            # Stop the reaper
-            await self._reaper.stop()
-
-            # Flush the accumulator (Requirement 10.7)
+            # Each step is guarded so that one failing cannot skip the next.
             try:
-                await self._store.flush()
+                await self._reaper.stop()
             except Exception:  # noqa: BLE001
+                _LOG.error("Failed to stop the claim reaper", exc_info=True)
+
+            # Stop the sampler, then the flusher, whose last act is a final
+            # flush of whatever is still pending (Requirement 10.5/10.7).
+            try:
+                await self._store.stop_rss_sampler()
+            except Exception:  # noqa: BLE001
+                _LOG.error("Failed to stop the RSS sampler", exc_info=True)
+            try:
+                await self._store.stop_flusher()
+            except Exception:  # noqa: BLE001
+                self.final_flush_failed = True
                 _LOG.error("Failed to flush accumulator during shutdown", exc_info=True)
 
             # Remove signal handlers

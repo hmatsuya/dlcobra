@@ -66,8 +66,7 @@ cshogi limitation ``config.py`` already accepts for Root_Position -- and
 that risk is unmitigated here for the same reason: there is no Python-level
 guard against it.)
 
-**Progress_Reporter integration.** ``report.py`` (task 16.1) does not
-exist yet, so ``BookDBParser`` accepts an optional ``on_rejected_line``
+**Progress_Reporter integration.** ``BookDBParser`` accepts an optional ``on_rejected_line``
 callback, ``Callable[[int, str], None]``, invoked with the 1-based line
 number and the exact line content for every rejected line (Requirement
 6.5's "report the line number and the line content to the Progress_

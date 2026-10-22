@@ -47,14 +47,6 @@ async def _imported(pg_scratch_database, pg_conn, tmp_path):
     return cfg, store
 
 
-async def test_unchanged_file_and_parser_need_no_reimport(pg_scratch_database, pg_conn, tmp_path):
-    cfg, store = await _imported(pg_scratch_database, pg_conn, tmp_path)
-    try:
-        assert await T.check_terashock_source(store.pool, cfg) is False
-    finally:
-        await store.close()
-
-
 async def test_import_records_the_parser_version(pg_scratch_database, pg_conn, tmp_path):
     cfg, store = await _imported(pg_scratch_database, pg_conn, tmp_path)
     try:
@@ -70,6 +62,7 @@ async def test_a_parser_bump_triggers_a_reimport_for_an_unchanged_file(
 ):
     cfg, store = await _imported(pg_scratch_database, pg_conn, tmp_path)
     try:
+        assert await T.check_terashock_source(store.pool, cfg) is False  # unchanged file, unchanged parser
         monkeypatch.setattr(T, "PARSER_VERSION", T.PARSER_VERSION + 1)
         # _get_file_identity builds its identity from the module constant at call time.
         assert await T.check_terashock_source(store.pool, cfg) is True

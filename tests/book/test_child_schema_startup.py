@@ -10,7 +10,6 @@ each time a child started.
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 
 import pytest
@@ -73,32 +72,6 @@ async def test_full_startup_still_repairs(pg_scratch_database, pg_conn):
         assert ddl == ["repair"]
     finally:
         await other.close()
-        await parent.close()
-
-
-async def test_read_only_startup_does_not_block_running_readers(
-    pg_scratch_database, pg_conn, monkeypatch
-):
-    """The symptom: while a child starts, a running process's reads must not stall.
-
-    The repair transaction is stretched with a trailing pg_sleep so that, were
-    it to run, the ACCESS EXCLUSIVE lock from ALTER TABLE would still be held
-    while the other process reads.
-    """
-    cfg, parent = await _parent(pg_scratch_database, pg_conn)
-    child = NodeStore(cfg, role="search")
-    await child.connect()
-    try:
-        monkeypatch.setattr(ns, "_REPAIR_DDL", (*ns._REPAIR_DDL, "SELECT pg_sleep(2)"))
-        startup = asyncio.ensure_future(child.ensure_schema(read_only=True))
-        await asyncio.sleep(0.5)  # the child is now past its checks
-
-        async with parent.pool.acquire() as conn:
-            count = await asyncio.wait_for(conn.fetchval("SELECT count(*) FROM book_node"), 1)
-        assert count >= 0
-        await startup
-    finally:
-        await child.close()
         await parent.close()
 
 

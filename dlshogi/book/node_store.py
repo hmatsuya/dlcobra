@@ -721,7 +721,9 @@ def _apply_pending_to_view(
     """Overlay a pending (unflushed) `BackupDelta` onto a `BookNodeView`.
 
     Requirement 4.5's visit-count invariant must hold on *read*, before any
-    flush; this is what makes that true for `get`/`get_many`. Returns
+    flush; this is what makes that true for `get`. `get_many` does not
+    overlay: its only caller is the propagate role, which never calls
+    `backup()`, so it has no unflushed deltas to show. Returns
     ``view`` itself, unmodified, when ``pending`` is `None` or carries no
     actual delta (the common case -- most reads find nothing pending),
     so callers that never touch the write path pay no allocation cost.
@@ -894,11 +896,17 @@ class NodeStore:
         (design.md: "The Progress_Reporter logs the effective setting at
         startup so the trade is visible" -- this module logs it via the
         stdlib `logging` module directly, since `report.py`'s
-        Progress_Reporter does not yet exist as a real implementation).
+        Progress_Reporter is not used at connection time).
         """
         retry_limit = int(self._config.connection_retry_limit)
         schedule = retry_schedule(retry_limit)
-        max_size = min(int(self._config.worker_count), 64)
+        # +1 so that, below the cap, Worker_Count workers can all hold a
+        # connection and the background flusher still has its own. Not a
+        # reservation: a pool cannot reserve a slot for one client, so at
+        # Worker_Count >= 64 the flusher queues like any other (a pool of 64
+        # with 256 busy workers measured a flusher-style acquire at a median
+        # of 0 ms, max 118 ms).
+        max_size = min(int(self._config.worker_count) + 1, 64)
 
         attempts = 0
         last_exc: Optional[BaseException] = None
@@ -1707,10 +1715,9 @@ class NodeStore:
         out-of-band flush is warranted (design.md's "on Cache_Budget
         pressure" flush trigger).
 
-        There is no Search_Coordinator yet (task 13) to poll this on a
-        schedule, so it is exposed as a plain predicate a future caller
-        can check; the 200 ms interval flusher (`start_flusher`) already
-        covers the steady-state case on its own. See the
+        Nothing polls this yet, so it is exposed as a plain predicate a
+        future caller can check; the 200 ms interval flusher
+        (`start_flusher`) already covers the steady-state case on its own. See the
         `_CACHE_PRESSURE_FRACTION` module constant for the threshold and
         the judgement call it documents.
         """
@@ -1823,11 +1830,6 @@ class NodeStore:
         """
         if not delta.edge_deltas:
             self.rowless_leaf_deltas += 1
-            _LOG.debug(
-                "Node_Store.flush: no book_node row for %r; skipping the "
-                "leaf-only delta of an unpersisted Max_Book_Ply leaf",
-                delta.key,
-            )
             return
         self.rowless_deltas_dropped += 1
         _LOG.warning(
@@ -1916,9 +1918,10 @@ class NodeStore:
         produce today but that a defensive caller could.
 
         Used by `flush()` whenever `self._puct_edge_extension_available`
-        is `True`. Like the fallback, matches "no book_node row" (an
-        unexpanded node) by an empty `UPDATE ... WHERE` match count and
-        drops the delta with a warning rather than raising, since
+        is `True`. Like the fallback, matches "no book_node row" by an empty
+        `UPDATE ... WHERE` match count and hands the delta to
+        `_note_rowless_delta` (counted; a warning only if it carries edge
+        deltas) rather than raising, since
         `asyncpg`'s `execute()` on an UPDATE does not raise for a
         no-op match; the row count in the returned status string is
         checked instead.
@@ -1966,11 +1969,9 @@ class NodeStore:
         """Start the background flusher coroutine (idempotent).
 
         Wakes every `_FLUSH_INTERVAL_S` (200 ms, design.md's
-        `flush_interval` default) and calls `flush()`. There is no
-        Search_Coordinator yet (task 13) to start this automatically, so a
-        caller (a test, or a later task's supervisor) must call this
-        explicitly; `NodeStore` does not start it on `connect()` or
-        `ensure_schema()`, since a `propagate`/`export`-role instance has
+        `flush_interval` default) and calls `flush()`. `SearchCoordinator.run()`
+        starts it for a search; `NodeStore` does not start it on `connect()`
+        or `ensure_schema()`, since a `propagate`/`export`-role instance has
         no use for it at all.
         """
         if self._flusher_task is not None and not self._flusher_task.done():
@@ -2092,9 +2093,8 @@ class NodeStore:
         expansion or a backup); a later export's staleness warning
         (Requirement 12.9's "or `search_write_seq > propagation_done_seq`")
         compares this against `propagation_done_seq`. No caller in this
-        task's scope invokes this yet (task 13's Search_Coordinator will);
-        it is provided here purely as the `book_meta` maintenance helper
-        design.md's schema implies.
+        task's scope invokes this yet; it is provided here purely as the
+        `book_meta` maintenance helper design.md's schema implies.
         """
 
         async def _do_bump(pool: asyncpg.Pool) -> int:
@@ -2130,10 +2130,9 @@ class NodeStore:
         """Record the resident memory at completion of Evaluator initialization.
 
         Requirement 15.4's bound is `Cache_Budget + evaluator RSS + 512
-        MiB`. No Evaluator exists yet (task 10), so this value defaults to
-        0 and is meant to be set once, right after a future Evaluator
-        finishes initializing, by whatever code drives that
-        initialization (task 13's Search_Coordinator, or a test).
+        MiB`. Defaults to 0; the search entry points in ``__main__`` set it
+        once, right after the Evaluator has started, so the model itself is
+        not counted as cache overshoot by the RSS sampler.
         """
         self._evaluator_baseline_rss_bytes = int(rss_bytes)
 
@@ -2150,11 +2149,9 @@ class NodeStore:
     def set_on_cache_release(self, callback: Optional[Callable[[], None]]) -> None:
         """Register a callback invoked once per cache-release event.
 
-        `report.py`'s real Progress_Reporter does not exist yet (task
-        16.1); `cache_release_events` (a plain counter) is always
-        incremented, and this callback is an additional, optional hook a
-        caller (a test, or a future Progress_Reporter) can observe events
-        through without polling the counter.
+        `cache_release_events` (a plain counter) is always incremented, and
+        this callback is an additional, optional hook a caller can observe
+        events through without polling the counter.
         """
         self._on_cache_release = callback
 
@@ -2196,9 +2193,8 @@ class NodeStore:
 
         Samples at most every `_RSS_SAMPLE_INTERVAL_S` (10 s, Requirement
         15.4's "at intervals of at most 10 seconds"); a caller may pass a
-        shorter ``interval_s`` for testing. Like `start_flusher`, there is
-        no Search_Coordinator yet to start this automatically, so a caller
-        must call this explicitly.
+        shorter ``interval_s`` for testing. Like `start_flusher`, it is started
+        by `SearchCoordinator.run()`.
         """
         if self._rss_task is not None and not self._rss_task.done():
             return
@@ -2240,8 +2236,8 @@ class NodeStore:
         `in_flight_claim` table the claims that have been held longer than
         one Report_Interval". Selecting *which* claims qualify (held
         longer than one Report_Interval) and running that once-per-
-        Report_Interval loop is the Search_Coordinator's job (task 13);
-        this method is only the storage primitive it calls.
+        Report_Interval loop is the Search_Coordinator's job; this method
+        is only the storage primitive it calls.
         """
         if not claims:
             return

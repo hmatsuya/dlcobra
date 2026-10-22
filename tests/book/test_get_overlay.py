@@ -35,12 +35,15 @@ _N = 5  # visits in every test delta
 
 async def _store(pg_scratch_database, pg_conn):
     await _drop_book_tables(pg_conn)
-    # Worker_Count sizes the pool; a reader needs a second connection while a
-    # flush transaction holds the first.
+    # The pool has Worker_Count + 1 connections; a reader needs one while a
+    # flush transaction holds another.
     cfg = dataclasses.replace(
         _make_config(pg_scratch_database, root_sfen=_INITIAL_SFEN), worker_count=4
     )
     store = await NodeStore.connect_and_prepare(cfg, role="search")
+    # The tests below patch the fallback backend; pin it so a database that has
+    # the puct_edge extension installed cannot route flush() around the patch.
+    store._puct_edge_extension_available = False
     await _run_small_search(store, cfg, max_descents=30)
     _, view = await store.get(_ROOT)
     store._cache.invalidate(_ROOT)

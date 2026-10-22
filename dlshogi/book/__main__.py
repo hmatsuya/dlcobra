@@ -41,10 +41,7 @@ _SHUTDOWN_BUDGET_S = 60.0
 
 def _positive_int(text: str) -> int:
     """argparse type for Requirement 13.10's 'an integer of at least 1'."""
-    try:
-        value = int(text)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"invalid int value: {text!r}") from None
+    value = int(text)  # argparse turns a ValueError here into "invalid ... value"
     if value < 1:
         raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
     return value
@@ -366,7 +363,9 @@ def _search_child_process(
     _import_cppshogi()
 
     # Run the async startup and search.
-    asyncio.run(_search_child_async(cfg, gpu_id, model_path, verbose, log_path, process_count))
+    rc = asyncio.run(_search_child_async(cfg, gpu_id, model_path, verbose, log_path, process_count))
+    if rc:
+        sys.exit(rc)  # the parent reports a non-zero child exit and returns 1
 
 
 async def _search_child_async(
@@ -376,8 +375,8 @@ async def _search_child_async(
     verbose: bool,
     log_path: Optional[str],
     process_count: int,
-) -> None:
-    """Async portion of the child search process."""
+) -> int:
+    """Async portion of the child search process; returns its exit status."""
     from dlshogi.book.evaluator import Evaluator, OnnxRuntimeInferenceSession
     from dlshogi.book.keys import position_key_from_sfen
     from dlshogi.book.node_store import NodeStore
@@ -415,6 +414,7 @@ async def _search_child_async(
         batch_timeout_ms=cfg.batch_timeout,
     )
     evaluator.start()
+    store.set_evaluator_baseline_rss(store._rss_reader())  # R15.4; see the method
 
     # Create the ProgressReporter.
     reporter = ProgressReporter(
@@ -442,6 +442,11 @@ async def _search_child_async(
     finally:
         reporter.stop()
         await evaluator.stop()
+
+    if coordinator.final_flush_failed:
+        _LOG.error("The final flush failed; the last window of visit counts is not stored")
+        return 1
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -512,6 +517,7 @@ async def _search_single_process(
         batch_timeout_ms=cfg.batch_timeout,
     )
     evaluator.start()
+    store.set_evaluator_baseline_rss(store._rss_reader())  # R15.4; see the method
 
     # Create the ProgressReporter.
     reporter = ProgressReporter(
@@ -539,6 +545,9 @@ async def _search_single_process(
         reporter.stop()
         await evaluator.stop()
 
+    if coordinator.final_flush_failed:
+        _LOG.error("The final flush failed; the last window of visit counts is not stored")
+        return 1
     return 0
 
 
