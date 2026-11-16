@@ -1,26 +1,113 @@
 #!/usr/bin/env bash
 # PUCT book pipeline: bounded search -> graceful stop -> propagate -> export.
 #
-# Usage: bash dlshogi/book/run.sh SEARCH_SECONDS [GPU_COUNT]
-#   SEARCH_SECONDS  how long to search before the graceful stop (a positive integer)
+# Usage: bash dlshogi/book/run.sh [SEARCH_SECONDS] [GPU_COUNT]   (both optional)
+#   SEARCH_SECONDS  how long to search before the graceful stop (a positive integer;
+#                   default 2592000 = 30 days, so the normal way to end a run is Ctrl-C)
 #   GPU_COUNT       search processes, one per GPU starting at GPU 0 (default 2)
 #
-# Every GPU it will use must be free. A GPU held by another model makes
-# onnxruntime fall back to the CPU without an error, which looks like a run
-# but is far too slow to matter, so the script refuses to start instead.
+# Every GPU it will use must be free. If model services hold the GPUs, the
+# script stops those services before retrying, then restarts only services that
+# were running when this script started.
 # The previous export is copied to output/old/ before it is replaced.
 set -uo pipefail
 cd /home/hmatsuya/workspace/Shogi/dlcobra
 ONNX="${ONNX:-/home/hmatsuya/workspace/Shogi/dlcobra/exp036_model.onnx}"
 PY="${PY:-/home/hmatsuya/workspace/Shogi/dlcobra/.venv/bin/python}"
 CFG=/tmp/config.yaml
-cp dlshogi/book/config.yaml "$CFG"
 TS_BOOK=/home/hmatsuya/workspace/Shogi/data/terashock/user_book1.db
-SEARCH_SECONDS="${1:-}"
+SEARCH_SECONDS="${1:-2592000}"   # 30 days; Ctrl-C (or TERM/HUP) to stop early
 GPU_COUNT="${2:-2}"
 die() { code="$1"; shift; echo "run.sh: $*" >&2; exit "$code"; }
+
+exec 9>/tmp/dlshogi-puct-book.lock
+flock -n 9 || die 1 "another book build is already running"
+CFG=/tmp/config.yaml
+cp dlshogi/book/config.yaml "$CFG"
+
+STRATA_PATTERN="/home/hmatsuya/opt/strata-orca/Strata/.venv/bin/python -m serve.server --engine strata"
+STRATA_START=/home/hmatsuya/opt/strata-orca/run-orca.sh
+LLAMA_SWAP=/home/hmatsuya/opt/llama-swap/llama-swap.sh
+STRATA_WAS_RUNNING=0
+LLAMA_WAS_RUNNING=0
+SERVICES_STOPPED=0
+
+strata_pids() { pgrep -f -- "^$STRATA_PATTERN" || true; }
+strata_running() { [ -n "$(strata_pids)" ]; }
+llama_running() { docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'llama-swap'; }
+
+stop_model_services() {
+    STRATA_WAS_RUNNING=0
+    LLAMA_WAS_RUNNING=0
+    [ -n "$(strata_pids)" ] && STRATA_WAS_RUNNING=1
+    llama_running && LLAMA_WAS_RUNNING=1
+    SERVICES_STOPPED=1
+
+    if [ "$LLAMA_WAS_RUNNING" -eq 1 ]; then
+        echo "stopping llama-swap before book search"
+        "$LLAMA_SWAP" stop || return 1
+    fi
+    if [ "$STRATA_WAS_RUNNING" -eq 1 ]; then
+        echo "stopping Strata server before book search"
+        for pid in $(strata_pids); do
+            pkill -TERM -P "$pid" 2>/dev/null || true
+            kill -TERM "$pid" 2>/dev/null || strata_running || true
+        done
+        for _ in $(seq 1 30); do
+            strata_running || return 0
+            sleep 2
+        done
+        echo "Strata server did not stop within 60 seconds" >&2
+        for pid in $(strata_pids); do
+            pkill -KILL -P "$pid" 2>/dev/null || true
+            kill -KILL "$pid" 2>/dev/null || true
+        done
+    fi
+}
+
+restore_model_services() {
+    trap '' INT TERM HUP
+    [ "$SERVICES_STOPPED" -eq 1 ] || return 0
+    if [ "$STRATA_WAS_RUNNING" -eq 1 ]; then
+        echo "restarting Strata server"
+        for _ in $(seq 1 60); do   # at least as long as stop_model_services' own 60s stop budget
+            strata_running || break
+            sleep 1
+        done
+        if strata_running; then
+            echo "warning: old Strata process is still alive after waiting 60s; not starting a second copy. Restart it by hand once it exits." >&2
+        else
+            # Subshell resets INT/TERM/HUP to defaults and closes the lock fd 9
+            # before exec, so the long-lived daemon neither inherits this
+            # script's ignored signals nor holds the book-build lock open.
+            (
+                trap - INT TERM HUP
+                exec 9>&-
+                exec nohup "$STRATA_START" >>/tmp/strata-orca-run.log 2>&1 </dev/null
+            ) &
+            sleep 3
+            strata_running || echo "warning: Strata did not come back; see /tmp/strata-orca-run.log" >&2
+        fi
+    fi
+    if [ "$LLAMA_WAS_RUNNING" -eq 1 ]; then
+        echo "restarting llama-swap"
+        "$LLAMA_SWAP" start || echo "warning: could not restart llama-swap" >&2
+    fi
+    SERVICES_STOPPED=0
+}
+
+# shortcut: the EXIT trap below does not run on SIGKILL or a crash, so a
+# service stopped for this run stays stopped if that happens; restart it by hand.
+trap restore_model_services EXIT
+
+preflight_interrupt() {
+    trap '' INT TERM HUP
+    echo "run.sh: interrupted during GPU preflight; leaving the previous export untouched" >&2
+    exit 130
+}
+trap preflight_interrupt INT TERM HUP
 is_positive_int() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; [ "$((10#$1))" -ge 1 ]; }
-is_positive_int "$SEARCH_SECONDS" || { echo "usage: bash $0 SEARCH_SECONDS [GPU_COUNT]  (SEARCH_SECONDS must be a positive integer)" >&2; exit 2; }
+is_positive_int "$SEARCH_SECONDS" || { echo "usage: bash $0 [SEARCH_SECONDS] [GPU_COUNT]  (SEARCH_SECONDS must be a positive integer)" >&2; exit 2; }
 is_positive_int "$GPU_COUNT" || { echo "GPU_COUNT must be a positive integer, got '$GPU_COUNT'" >&2; exit 2; }
 GPU_COUNT=$((10#$GPU_COUNT))   # '010' is ten, not octal eight
 SEARCH_SECONDS=$((10#$SEARCH_SECONDS))
@@ -28,16 +115,36 @@ MIN_FREE_MIB="${MIN_FREE_MIB:-4000}"
 case "$MIN_FREE_MIB" in ''|*[!0-9]*) echo "MIN_FREE_MIB must be a non-negative integer, got '$MIN_FREE_MIB'" >&2; exit 2 ;; esac
 SIGINT_GRACE_STEPS="${SIGINT_GRACE_STEPS:-200}"   # 5 s each
 is_positive_int "$SIGINT_GRACE_STEPS" || { echo "SIGINT_GRACE_STEPS must be a positive integer, got '$SIGINT_GRACE_STEPS'" >&2; exit 2; }
-for gpu in $(seq 0 $((GPU_COUNT - 1))); do
-    free=$(nvidia-smi -i "$gpu" --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | tr -d ' ')
-    case "$free" in
-        ''|*[!0-9]*) echo "GPU $gpu: no usable reading from nvidia-smi (is there a GPU $gpu?); lower GPU_COUNT." >&2; exit 1 ;;
-    esac
-    if [ "$free" -lt "$MIN_FREE_MIB" ]; then
-        echo "GPU $gpu has $free MiB free (need $MIN_FREE_MIB): unload whatever holds it, or lower GPU_COUNT." >&2
-        exit 1
+gpu_preflight() {
+    for gpu in $(seq 0 $((GPU_COUNT - 1))); do
+        free=$(nvidia-smi -i "$gpu" --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | tr -d ' ')
+        case "$free" in
+            ''|*[!0-9]*) echo "GPU $gpu: no usable reading from nvidia-smi (is there a GPU $gpu?)" >&2; return 2 ;;
+        esac
+        if [ "$free" -lt "$MIN_FREE_MIB" ]; then
+            echo "GPU $gpu has $free MiB free (need $MIN_FREE_MIB)" >&2
+            return 1
+        fi
+    done
+    return 0
+}
+
+preflight_rc=0
+gpu_preflight || preflight_rc=$?
+if [ "$preflight_rc" -eq 1 ]; then
+    if [ "${PREFLIGHT_ONLY:-0}" = 1 ]; then
+        die 1 "GPU preflight failed (PREFLIGHT_ONLY=1 does not stop model services)"
     fi
-done
+    echo "insufficient GPU memory; stopping model services before retrying"
+    stop_model_services || die 1 "could not stop the model services safely"
+    for _ in $(seq 1 12); do
+        gpu_preflight && break
+        sleep 5
+    done
+    gpu_preflight || die 1 "GPU preflight still failed after stopping the model services"
+elif [ "$preflight_rc" -ne 0 ]; then
+    die 1 "GPU preflight failed"
+fi
 [ "${PREFLIGHT_ONLY:-0}" = 1 ] && { echo "preflight ok: $GPU_COUNT GPU(s) with >= $MIN_FREE_MIB MiB free"; exit 0; }
 LOG=/tmp/punct_book_run.log
 OUT="${OUT:-/home/hmatsuya/workspace/Shogi/dlcobra/output}"
@@ -69,6 +176,7 @@ stop_search() {
     wait "$SEARCH_PID" 2>/dev/null
     return 1
 }
+# Ctrl-C during preflight or service shutdown still runs the restore trap.
 # Ctrl-C, TERM or HUP aimed at this script: stop the search gracefully and quit
 # without touching the previous export (the search would otherwise be orphaned).
 on_interrupt() {

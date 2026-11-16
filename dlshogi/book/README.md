@@ -133,6 +133,7 @@ All ranges are inclusive. "required" = must be present (only
 | `Terashock_Book path` | 1–4,096 chars, **optional** | Path to a YaneuraOu Terashock `.db` to seed from. If absent, `import-terashock` and the Terashock prior index are disabled. |
 
 ### 3. Build the book
+The convenience launcher `puct-book` runs the same pipeline with optional `SEARCH_SECONDS` (default 2,592,000 seconds / 30 days) and `GPU_COUNT` (default 2). It stops Strata and llama-swap only when GPU preflight finds insufficient free memory, then restores services that were running before the launch. Use `PREFLIGHT_ONLY=1 puct-book` for a non-destructive GPU check. A manual Ctrl-C stops search without running propagation or export; run those steps afterward if needed.
 
 ```bash
 # grow the book graph with PUCT search (spawns --gpu-count GPU worker processes)
