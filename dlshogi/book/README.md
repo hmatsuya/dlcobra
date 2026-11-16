@@ -134,6 +134,8 @@ All ranges are inclusive. "required" = must be present (only
 
 ### 3. Build the book
 The convenience launcher `puct-book` runs the same pipeline with optional `SEARCH_SECONDS` (default 2,592,000 seconds / 30 days) and `GPU_COUNT` (default 2). It stops Strata and llama-swap only when GPU preflight finds insufficient free memory, then restores services that were running before the launch. Use `PREFLIGHT_ONLY=1 puct-book` for a non-destructive GPU check. A manual Ctrl-C stops search without running propagation or export; run those steps afterward if needed.
+For detached control, use `puct-bookctl start [SEARCH_SECONDS] [GPU_COUNT]`, `puct-bookctl stop`, `puct-bookctl restart [SEARCH_SECONDS] [GPU_COUNT]`, or `puct-bookctl status`. The controller keeps its state in `output/.puct-book` and sends a graceful interrupt on stop; it does not force-kill the builder.
+`status` exits 0 only when the tracked builder is running. It exits 1 when the builder is stopped or its PID metadata is stale, which makes it suitable for monitoring checks.
 
 ```bash
 # grow the book graph with PUCT search (spawns --gpu-count GPU worker processes)
