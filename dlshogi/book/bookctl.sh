@@ -5,8 +5,10 @@ set -u
 SCRIPT_PATH=$(readlink -f -- "${BASH_SOURCE[0]}") || { echo "could not resolve script path" >&2; exit 1; }
 REPO=$(cd -- "$(dirname -- "$SCRIPT_PATH")/../.." && pwd -P) || { echo "could not resolve project path" >&2; exit 1; }
 RUN="$REPO/dlshogi/book/run.sh"
+BOOK_LOCK_DIR="$REPO/output/.puct-book"
+BOOK_LOCK_FILE="$BOOK_LOCK_DIR/book.lock"
 NAME=puct-book
-STATE_DIR="${PUCT_BOOK_STATE_DIR:-$REPO/output/.puct-book}"
+STATE_DIR="${PUCT_BOOK_STATE_DIR:-$BOOK_LOCK_DIR}"
 PID_FILE="$STATE_DIR/$NAME.pid"
 LOCK_FILE="$STATE_DIR/$NAME.ctl.lock"
 LOG_FILE="${PUCT_BOOK_LOG:-$REPO/output/puct-book-run.log}"
@@ -21,6 +23,49 @@ if [ ! -d "$STATE_DIR" ]; then
   (umask 077 && mkdir -p -- "$STATE_DIR") || { echo "could not create state directory: $STATE_DIR" >&2; exit 1; }
 fi
 chmod 700 -- "$STATE_DIR" || { echo "could not secure state directory: $STATE_DIR" >&2; exit 1; }
+if [ "$STATE_DIR" != "$BOOK_LOCK_DIR" ]; then
+  if [ -L "$BOOK_LOCK_DIR" ] || { [ -e "$BOOK_LOCK_DIR" ] && [ ! -d "$BOOK_LOCK_DIR" ]; }; then
+    echo "book lock path is not a directory: $BOOK_LOCK_DIR" >&2
+    exit 1
+  fi
+  if [ ! -d "$BOOK_LOCK_DIR" ]; then
+    (umask 077 && mkdir -p -- "$BOOK_LOCK_DIR") || { echo "could not create book lock directory: $BOOK_LOCK_DIR" >&2; exit 1; }
+  fi
+  chmod 700 -- "$BOOK_LOCK_DIR" || { echo "could not secure book lock directory: $BOOK_LOCK_DIR" >&2; exit 1; }
+fi
+
+external_builder_running() {
+  [ -e "$BOOK_LOCK_FILE" ] || return 1
+  ! ( exec 8<"$BOOK_LOCK_FILE"; flock -n 8 )
+}
+
+resolve_service_paths() {
+  [ -n "${HOME:-}" ] || { echo "HOME is unset; cannot resolve model service paths" >&2; return 1; }
+  STRATA_CTL="$HOME/opt/strata-orca/strata.sh"
+  LLAMA_SWAP="$HOME/opt/llama-swap/llama-swap.sh"
+}
+
+check_service_scripts() {
+  [ -x "$STRATA_CTL" ] || { echo "service script missing or not executable: $STRATA_CTL" >&2; return 1; }
+  [ -x "$LLAMA_SWAP" ] || { echo "service script missing or not executable: $LLAMA_SWAP" >&2; return 1; }
+}
+
+is_positive_int() {
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$((10#$1))" -ge 1 ]
+}
+
+validate_book_args() {
+  [ "$#" -le 2 ] || { echo "usage: $0 book [SEARCH_SECONDS] [GPU_COUNT]" >&2; return 2; }
+  if [ "$#" -ge 1 ] && ! is_positive_int "$1"; then
+    echo "SEARCH_SECONDS must be a positive integer, got '$1'" >&2
+    return 2
+  fi
+  if [ "$#" -ge 2 ] && ! is_positive_int "$2"; then
+    echo "GPU_COUNT must be a positive integer, got '$2'" >&2
+    return 2
+  fi
+}
 COMMAND=${1:-status}
 exec 9>"$LOCK_FILE" || { echo "could not open controller lock: $LOCK_FILE" >&2; exit 1; }
 if [ "$COMMAND" = status ]; then
@@ -217,5 +262,27 @@ case "$COMMAND" in
   stop) do_stop ;;
   restart) shift; do_stop && do_start "$@" ;;
   status) do_status ;;
-  *) echo "usage: $0 {start|stop|restart|status} [SEARCH_SECONDS] [GPU_COUNT]"; exit 2 ;;
+  llama)
+    [ "$#" -eq 1 ] || { echo "usage: $0 llama" >&2; exit 2; }
+    if external_builder_running; then
+      echo "a book builder holds the run lock; stop it with '$0 stop' before starting llama-swap" >&2
+      exit 1
+    fi
+    resolve_service_paths || exit 1
+    check_service_scripts || exit 1
+    do_stop && "$STRATA_CTL" stop 9>&- && "$LLAMA_SWAP" start 9>&-
+    ;;
+  book)
+    shift
+    validate_book_args "$@" || exit $?
+    if external_builder_running; then
+      echo "a book builder holds the run lock; stop it with '$0 stop' before starting another book build" >&2
+      exit 1
+    fi
+    resolve_service_paths || exit 1
+    check_service_scripts || exit 1
+    [ -x "$RUN" ] || { echo "launcher missing or not executable: $RUN" >&2; exit 1; }
+    "$STRATA_CTL" stop 9>&- && "$LLAMA_SWAP" stop 9>&- && do_start "$@"
+    ;;
+  *) echo "usage: $0 {start|stop|restart|status|llama|book} [SEARCH_SECONDS] [GPU_COUNT]"; exit 2 ;;
 esac

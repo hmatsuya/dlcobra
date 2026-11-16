@@ -16,11 +16,18 @@ ONNX="${ONNX:-/home/hmatsuya/workspace/Shogi/dlcobra/exp036_model.onnx}"
 PY="${PY:-/home/hmatsuya/workspace/Shogi/dlcobra/.venv/bin/python}"
 CFG=/tmp/config.yaml
 TS_BOOK=/home/hmatsuya/workspace/Shogi/data/terashock/user_book1.db
+BOOK_LOCK_DIR=/home/hmatsuya/workspace/Shogi/dlcobra/output/.puct-book
+BOOK_LOCK_FILE="$BOOK_LOCK_DIR/book.lock"
 SEARCH_SECONDS="${1:-2592000}"   # 30 days; Ctrl-C (or TERM/HUP) to stop early
 GPU_COUNT="${2:-2}"
 die() { code="$1"; shift; echo "run.sh: $*" >&2; exit "$code"; }
 
-exec 9>/tmp/dlshogi-puct-book.lock
+if [ -L "$BOOK_LOCK_DIR" ] || { [ -e "$BOOK_LOCK_DIR" ] && [ ! -d "$BOOK_LOCK_DIR" ]; }; then
+    die 1 "book lock directory is not a directory: $BOOK_LOCK_DIR"
+fi
+mkdir -p -- "$BOOK_LOCK_DIR" || die 1 "could not create book lock directory: $BOOK_LOCK_DIR"
+chmod 700 -- "$BOOK_LOCK_DIR" || die 1 "could not secure book lock directory: $BOOK_LOCK_DIR"
+exec 9>"$BOOK_LOCK_FILE" || die 1 "could not open book lock: $BOOK_LOCK_FILE"
 flock -n 9 || die 1 "another book build is already running"
 CFG=/tmp/config.yaml
 cp dlshogi/book/config.yaml "$CFG"
@@ -32,11 +39,20 @@ STRATA_WAS_RUNNING=0
 LLAMA_WAS_RUNNING=0
 SERVICES_STOPPED=0
 
+check_service_scripts() {
+    [ -x "$STRATA_START" ] || { echo "service script missing or not executable: $STRATA_START" >&2; return 1; }
+    [ -x "$LLAMA_SWAP" ] || { echo "service script missing or not executable: $LLAMA_SWAP" >&2; return 1; }
+}
+
+# Direct preflight does not manage services, so it does not require their scripts.
+[ "${PREFLIGHT_ONLY:-0}" = 1 ] || check_service_scripts || die 1 "cannot manage model services"
+
 strata_pids() { pgrep -f -- "^$STRATA_PATTERN" || true; }
 strata_running() { [ -n "$(strata_pids)" ]; }
 llama_running() { docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'llama-swap'; }
 
 stop_model_services() {
+    check_service_scripts || return 1
     STRATA_WAS_RUNNING=0
     LLAMA_WAS_RUNNING=0
     [ -n "$(strata_pids)" ] && STRATA_WAS_RUNNING=1
@@ -45,7 +61,7 @@ stop_model_services() {
 
     if [ "$LLAMA_WAS_RUNNING" -eq 1 ]; then
         echo "stopping llama-swap before book search"
-        "$LLAMA_SWAP" stop || return 1
+        "$LLAMA_SWAP" stop 9>&- || return 1
     fi
     if [ "$STRATA_WAS_RUNNING" -eq 1 ]; then
         echo "stopping Strata server before book search"
@@ -91,7 +107,7 @@ restore_model_services() {
     fi
     if [ "$LLAMA_WAS_RUNNING" -eq 1 ]; then
         echo "restarting llama-swap"
-        "$LLAMA_SWAP" start || echo "warning: could not restart llama-swap" >&2
+        "$LLAMA_SWAP" start 9>&- || echo "warning: could not restart llama-swap" >&2
     fi
     SERVICES_STOPPED=0
 }
