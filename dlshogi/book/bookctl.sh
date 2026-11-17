@@ -163,7 +163,7 @@ send_sigint() {
     echo "could not send SIGINT to book builder (pid=$pid changed)" >&2
     return 1
   fi
-  if kill -INT "$pid" 2>/dev/null; then
+  if kill -INT -- "-$pid" 2>/dev/null; then
     return 0
   fi
   process_has_exited && return 0
