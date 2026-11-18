@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Manage the PUCT book builder: start | stop | restart | status
+# Manage the PUCT book builder: start | stop | restart | status | llama | book | restore
 set -u
 
 SCRIPT_PATH=$(readlink -f -- "${BASH_SOURCE[0]}") || { echo "could not resolve script path" >&2; exit 1; }
@@ -12,6 +12,7 @@ STATE_DIR="${PUCT_BOOK_STATE_DIR:-$BOOK_LOCK_DIR}"
 PID_FILE="$STATE_DIR/$NAME.pid"
 LOCK_FILE="$STATE_DIR/$NAME.ctl.lock"
 LOG_FILE="${PUCT_BOOK_LOG:-$REPO/output/puct-book-run.log}"
+RESTORE_FILE="$STATE_DIR/restore-services"
 # run.sh can spend 1000s waiting for graceful search shutdown before restoration.
 STOP_TIMEOUT="${PUCT_BOOK_STOP_TIMEOUT:-1200}"
 
@@ -48,6 +49,69 @@ resolve_service_paths() {
 check_service_scripts() {
   [ -x "$STRATA_CTL" ] || { echo "service script missing or not executable: $STRATA_CTL" >&2; return 1; }
   [ -x "$LLAMA_SWAP" ] || { echo "service script missing or not executable: $LLAMA_SWAP" >&2; return 1; }
+}
+
+# Keep this identical to STRATA_PATTERN in run.sh. It does not match the sibling ~/opt/Strata install.
+STRATA_PATTERN="/home/hmatsuya/opt/strata-orca/Strata/.venv/bin/python -m serve.server --engine strata"
+strata_running() { pgrep -f -- "^$STRATA_PATTERN" >/dev/null 2>&1; }
+llama_swap_running() {
+  local containers
+  containers=$(docker ps --format '{{.Names}}' 2>/dev/null) || return 2
+  printf '%s\n' "$containers" | grep -qx llama-swap
+}
+
+write_restore_services() {
+  local services= tmp llama_status
+  [ -e "$RESTORE_FILE" ] && return 0
+  if strata_running; then
+    services+="strata\n"
+  fi
+  llama_swap_running
+  llama_status=$?
+  case "$llama_status" in
+    0) services+="llama-swap\n" ;;
+    1) ;;
+    *) return 1 ;;
+  esac
+  tmp=$(mktemp "$RESTORE_FILE.tmp.XXXXXX") || return 1
+  if ! printf '%b' "$services" >"$tmp" || ! mv -f -- "$tmp" "$RESTORE_FILE"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+}
+
+restore_services() {
+  local service restore_strata=0 restore_llama_swap=0
+  if [ ! -e "$RESTORE_FILE" ]; then
+    echo "no restore-services record exists; nothing to restore"
+    return 0
+  fi
+  [ -r "$RESTORE_FILE" ] || { echo "restore-services record is not readable: $RESTORE_FILE" >&2; return 1; }
+  while IFS= read -r service || [ -n "$service" ]; do
+    case "$service" in
+      '') ;;
+      strata) restore_strata=1 ;;
+      llama-swap) restore_llama_swap=1 ;;
+      *) echo "invalid service in restore-services record: $service" >&2; return 1 ;;
+    esac
+  done <"$RESTORE_FILE"
+  if [ "$restore_strata" -eq 0 ] && [ "$restore_llama_swap" -eq 0 ]; then
+    rm -f -- "$RESTORE_FILE" || return 1
+    echo "restore-services record was empty; nothing to restore"
+    return 0
+  fi
+  resolve_service_paths || return 1
+  check_service_scripts || return 1
+  if [ "$restore_strata" -eq 1 ] && ! "$STRATA_CTL" start 9>&-; then
+    echo "could not restore Strata; retaining restore-services record" >&2
+    return 1
+  fi
+  if [ "$restore_llama_swap" -eq 1 ] && ! "$LLAMA_SWAP" start 9>&-; then
+    echo "could not restore llama-swap; retaining restore-services record" >&2
+    return 1
+  fi
+  rm -f -- "$RESTORE_FILE" || return 1
+  echo "restored recorded model services"
 }
 
 is_positive_int() {
@@ -270,7 +334,7 @@ case "$COMMAND" in
     fi
     resolve_service_paths || exit 1
     check_service_scripts || exit 1
-    do_stop && "$STRATA_CTL" stop 9>&- && "$LLAMA_SWAP" start 9>&-
+    do_stop && "$STRATA_CTL" stop 9>&- && "$LLAMA_SWAP" start 9>&- && rm -f -- "$RESTORE_FILE"
     ;;
   book)
     shift
@@ -282,7 +346,16 @@ case "$COMMAND" in
     resolve_service_paths || exit 1
     check_service_scripts || exit 1
     [ -x "$RUN" ] || { echo "launcher missing or not executable: $RUN" >&2; exit 1; }
+    write_restore_services || { echo "could not record model services for restoration" >&2; exit 1; }
     "$STRATA_CTL" stop 9>&- && "$LLAMA_SWAP" stop 9>&- && do_start "$@"
     ;;
-  *) echo "usage: $0 {start|stop|restart|status|llama|book} [SEARCH_SECONDS] [GPU_COUNT]"; exit 2 ;;
+  restore)
+    [ "$#" -eq 1 ] || { echo "usage: $0 restore" >&2; exit 2; }
+    if external_builder_running; then
+      echo "a book builder holds the run lock; stop it with '$0 stop' before restoring model services" >&2
+      exit 1
+    fi
+    restore_services
+    ;;
+  *) echo "usage: $0 {start|stop|restart|status|llama|book|restore} [SEARCH_SECONDS] [GPU_COUNT]"; exit 2 ;;
 esac

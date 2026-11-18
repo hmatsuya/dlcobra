@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Switch between book building and llama serving as the Windows host appears/disappears.
+# It switches between book building and restoring the pre-book model services.
 set -u
 
 PATH=/usr/bin:/bin
@@ -47,7 +47,7 @@ write_pending() {
   fi
 }
 
-# An absent or malformed state is unknown: it never switches to llama until a down state is recorded.
+# An absent or malformed state is unknown: it never restores services until a down state is recorded.
 previous=
 if [ -r "$STATE_FILE" ]; then
   state=$(cat -- "$STATE_FILE" 2>/dev/null) || state=
@@ -91,17 +91,17 @@ if [ "$reachable" = up ]; then
   fi
 
   if [ "$previous" = down ]; then
-    log "Windows host $HOST is up; switching to llama mode"
+    log "Windows host $HOST is up; restoring pre-book model services"
     if ! "$CTL" stop >>"$LOG_FILE" 2>&1; then
       log "failure: puct-bookctl stop failed; retaining down state"
       exit 1
     fi
-    if ! "$CTL" llama >>"$LOG_FILE" 2>&1; then
-      log "failure: puct-bookctl llama failed; retaining down state"
+    if ! "$CTL" restore >>"$LOG_FILE" 2>&1; then
+      log "failure: puct-bookctl restore failed; retaining down state"
       exit 1
     fi
     if ! write_state up; then
-      log "failure: could not record up state after llama switch"
+      log "failure: could not record up state after model-service restore"
       exit 1
     fi
   elif [ "$previous" != up ]; then
