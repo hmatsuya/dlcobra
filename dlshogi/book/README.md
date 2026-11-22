@@ -157,5 +157,30 @@ Optionally seed from an existing YaneuraOu Terashock book before `search`:
 python -m dlshogi.book import-terashock --config config.yaml
 ```
 
+
+### 4. Benchmark the exported books
+
+Run the CPU YaneuraOu benchmark to compare the generated PUCT book, the Terashock source book, and no book:
+
+```bash
+./dlshogi/book/benchmark.sh
+```
+
+The default run plays 30 games per pairing and writes `output/book-benchmark.json`:
+
+- PUCT vs no book
+- PUCT vs Terashock
+- Terashock vs no book
+
+The benchmark uses `/home/hmatsuya/workspace/Shogi/YaneuraOuOriginal/exe/YaneuraOu-by-gcc`, 100,000 nodes per move, four YaneuraOu threads, and `USI_Ponder=false`. Its global concurrency default is 8 games, divided across the three pairings. Books are staged in a unique temporary directory and removed after the run.
+
+Override the main settings with environment variables:
+
+```bash
+GAMES=100 NODES=100000 CONCURRENCY=8 MAX_PLY=256 TIMEOUT=120 \
+  ./dlshogi/book/benchmark.sh
+```
+
+Set `BOOK_DIR=/path/to/dir` to preserve staged books in a user-owned directory. Pass `--keep-temp` to preserve and print a benchmark-owned temporary directory. The benchmark sets `BookDepthLimit=0`, `ConsiderBookMoveCount=true`, `BookEvalWhiteLimit=-300`, and disables pondering. It uses fourfold repetition adjudication and reports wins, losses, draws, and aborted games in the JSON output.
 `search` is the only GPU-bound step (keep `--gpu-count` at or below your GPU
 count); `propagate` and `export` use the database only.
