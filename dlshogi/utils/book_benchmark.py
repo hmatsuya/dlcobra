@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import re
@@ -12,6 +12,7 @@ import shutil
 import tempfile
 import subprocess
 import sys
+import threading
 from collections import defaultdict
 
 import time
@@ -166,6 +167,17 @@ class USIProcess:
                     raise BenchmarkError(f"malformed bestmove: {line!r}")
                 return fields[1], self.has_book and last_nodes == 0
 
+    def new_game(self) -> None:
+        """Start a game on a reused engine: usinewgame, then isready/readyok (the engine clears its search state there)."""
+        self._send("usinewgame")
+        self._send("isready")
+        while True:
+            line = self._read_line()
+            if "Error!" in line:
+                raise BenchmarkError(f"engine new game failed: {line}")
+            if line == "readyok":
+                return
+
     def gameover(self, result: str) -> None:
         self._send(f"gameover {result}")
 
@@ -212,9 +224,9 @@ def play_game(engine_a: USIProcess, engine_b: USIProcess, nodes: int, a_is_black
     record = GameRecord("aborted", a_is_black)
     repetitions = defaultdict(int)
     repetitions[board.zobrist_hash()] = 1
-    engine_a._send("usinewgame")
-    engine_b._send("usinewgame")
     try:
+        engine_a.new_game()
+        engine_b.new_game()
         for ply in range(max_ply):
             repetition = board.is_draw()
             if repetitions[board.zobrist_hash()] < 4:
@@ -316,40 +328,67 @@ def format_pair(pair: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
-def run_pair(name_a: str, file_a: str, name_b: str, file_b: str, *, engine: Path, book_dir: Path, games: int, nodes: int, timeout: float, max_ply: int, concurrency: int) -> dict[str, object]:
-    records: list[GameRecord] = []
+class EnginePool:
+    """Engines shared by every pairing, kept per book file. An engine's state depends on its book, not on its opponent."""
 
-    def start():
-        return (USIProcess(engine, file_a, book_dir, timeout, nodes), USIProcess(engine, file_b, book_dir, timeout, nodes))
+    def __init__(self, engine: Path, book_dir: Path, timeout: float, nodes: int):
+        self._args = (engine, book_dir, timeout, nodes)
+        self._idle: dict[str, list[USIProcess]] = defaultdict(list)
+        self._all: list[USIProcess] = []
+        self._lock = threading.Lock()
 
-    # Each lane owns two engine processes. Games in a pairing run concurrently.
-    lanes = [start() for _ in range(min(concurrency, games))]
-    pending = list(range(games))
-    executor = ThreadPoolExecutor(max_workers=len(lanes))
+    def get(self, book_file: str) -> USIProcess:
+        with self._lock:
+            if self._idle[book_file]:
+                return self._idle[book_file].pop()
+        process = USIProcess(self._args[0], book_file, *self._args[1:])  # slow (network load), so outside the lock
+        with self._lock:
+            self._all.append(process)
+        return process
+
+    def put(self, process: USIProcess, book_file: str, reusable: bool) -> None:
+        if reusable:
+            with self._lock:
+                self._idle[book_file].append(process)
+        else:
+            process.close()  # an engine that timed out may still be searching
+
+    def close_all(self) -> None:
+        for process in self._all:  # close() is idempotent
+            process.close()
+
+
+def run_pairs(specs: list[tuple[str, str, str, str]], *, engine: Path, book_dir: Path, games: int, nodes: int, timeout: float, max_ply: int, concurrency: int) -> list[dict[str, object]]:
+    """Play ``games`` games of every pairing in ``specs`` with ``concurrency`` games in flight in total.
+
+    The games of all pairings share one queue, interleaved, so a worker is never idle while any game is left."""
+    pool = EnginePool(engine, book_dir, timeout, nodes)
+
+    def run_game(spec: tuple[str, str, str, str], game: int) -> GameRecord:
+        _, file_a, _, file_b = spec
+        a = b = record = None
+        try:
+            a = pool.get(file_a)
+            b = pool.get(file_b)
+            record = play_game(a, b, nodes, game % 2 == 0, max_ply)
+            return record
+        finally:
+            reusable = record is not None and record.result != "aborted"
+            for process, book_file in ((a, file_a), (b, file_b)):
+                if process is not None:
+                    pool.put(process, book_file, reusable)
+
+    tasks = [(index, game) for game in range(games) for index in range(len(specs))]
+    executor = ThreadPoolExecutor(max_workers=concurrency)
     try:
-        futures = {}
-        for lane, (a, b) in enumerate(lanes):
-            if pending:
-                game = pending.pop(0)
-                futures[executor.submit(play_game, a, b, nodes, game % 2 == 0, max_ply)] = (lane, game, a, b)
-        while futures:
-            done, _ = wait(futures, return_when=FIRST_COMPLETED)
-            for future in done:
-                lane, game, a, b = futures.pop(future)
-                records.append(future.result())
-                a.close()
-                b.close()
-                if pending:
-                    a, b = start()
-                    lanes[lane] = (a, b)
-                    next_game = pending.pop(0)
-                    futures[executor.submit(play_game, a, b, nodes, next_game % 2 == 0, max_ply)] = (lane, next_game, a, b)
+        futures = [executor.submit(run_game, specs[index], game) for index, game in tasks]
+        records: list[list[GameRecord]] = [[] for _ in specs]
+        for (index, _), future in zip(tasks, futures):
+            records[index].append(future.result())  # raises the first failure in task order
     finally:
-        executor.shutdown(wait=True)
-        for a, b in lanes:
-            a.close()
-            b.close()
-    return summarize(name_a, name_b, records, games)
+        executor.shutdown(wait=True, cancel_futures=True)
+        pool.close_all()
+    return [summarize(a, b, records[index], games) for index, (a, _, b, _) in enumerate(specs)]
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -384,21 +423,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         ("puct", "user_book1.db", "terashock", "user_book2.db"),
         ("terashock", "user_book2.db", "none", "no_book"),
     ]
-    base, remainder = divmod(args.concurrency, len(pair_specs))
-    pair_concurrencies = [base + (i < remainder) for i in range(len(pair_specs))]
-    pair_concurrencies = [max(1, value) for value in pair_concurrencies]
-    def run(item):
-        spec, pair_concurrency = item
-        a, file_a, b, file_b = spec
-        return run_pair(a, file_a, b, file_b, engine=args.engine, book_dir=args.book_dir, games=args.games, nodes=args.nodes, timeout=args.timeout, max_ply=args.max_ply, concurrency=pair_concurrency)
-
-    with ThreadPoolExecutor(max_workers=len(pair_specs)) as executor:
-        pairs = list(executor.map(run, zip(pair_specs, pair_concurrencies)))
-
-
-
-
-    result = {"metadata": {"engine": str(args.engine), "book_dir": str(args.book_dir), "puct_book": str(args.puct_book), "terashock_book": str(args.terashock_book), "games_per_pair": args.games, "nodes_per_move": args.nodes, "max_ply": args.max_ply, "concurrency": args.concurrency, "pair_concurrency": pair_concurrencies, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, "book_staging": {"puct": puct_stats.__dict__, "terashock": terashock_stats.__dict__}, "pairs": pairs}
+    pairs = run_pairs(pair_specs, engine=args.engine, book_dir=args.book_dir, games=args.games, nodes=args.nodes, timeout=args.timeout, max_ply=args.max_ply, concurrency=args.concurrency)
+    result = {"metadata": {"engine": str(args.engine), "book_dir": str(args.book_dir), "puct_book": str(args.puct_book), "terashock_book": str(args.terashock_book), "games_per_pair": args.games, "nodes_per_move": args.nodes, "max_ply": args.max_ply, "concurrency": args.concurrency, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, "book_staging": {"puct": puct_stats.__dict__, "terashock": terashock_stats.__dict__}, "pairs": pairs}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     for pair in pairs:
