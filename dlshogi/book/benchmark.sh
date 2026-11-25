@@ -3,10 +3,10 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 PYTHON=${PYTHON:-"$ROOT/.venv/bin/python"}
-ENGINE=${ENGINE:-"/home/hmatsuya/workspace/Shogi/YaneuraOuOriginal/exe/YaneuraOu-by-gcc"}
+ENGINE=${ENGINE:-"/home/hmatsuya/workspace/Shogi/nagisa-bench/NAGISA_V4"}
 BOOK_DIR=${BOOK_DIR:-}
 PUCT_BOOK=${PUCT_BOOK:-"$ROOT/output/punct_book.yaneuraou.db"}
-TERASHOCK_BOOK=${TERASHOCK_BOOK:-"/home/hmatsuya/workspace/Shogi/data/terashock/user_book1.db"}
+TERASHOCK_BOOK=${TERASHOCK_BOOK:-"/home/hmatsuya/workspace/Shogi/data/terashock/new_petabook_20250505c.db"}
 LIBRARY_PATH=${LIBRARY_PATH:-"/opt/onnxruntime-linux-x64-gpu-1.14.1/lib"}
 GAMES=${GAMES:-30}
 NODES=${NODES:-100000}

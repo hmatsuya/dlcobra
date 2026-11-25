@@ -130,7 +130,7 @@ All ranges are inclusive. "required" = must be present (only
 | `Report_Interval` | 1–3,600 s | Seconds between progress-report ticks. |
 | `Throughput_Floor` | 0.01–100,000 descents/s | Measured descent rate below which the degraded-throughput warning may fire. Keep it at or below roughly 1,500 × (number of `search` processes). |
 | `Throughput_Grace_Period` | 60–86,400 s | How long the rate may stay below `Throughput_Floor` before the warning fires. |
-| `Terashock_Book path` | 1–4,096 chars, **optional** | Path to a YaneuraOu Terashock `.db` to seed from. If absent, `import-terashock` and the Terashock prior index are disabled. |
+| `Terashock_Book path` | 1–4,096 chars, **optional** | Path to a YaneuraOu Terashock `.db` to seed from. If absent, `import-terashock` and the Terashock prior index are disabled. The default config uses the 2.25M-position 新ペタショック定跡 (`new_petabook_20250505c.db`), which `run.sh` downloads and checks against its SHA-256 if the file is missing. That book lists Black-to-move positions only, so the importer also stores each position's 180-degree flip (moves rotated, `eval` kept as it is a score for the side to move); the search looks positions up by exact key and would otherwise find no prior for White to move. The parser rejects 71,109 of the book's 16.1M move lines (27,057 "being mated" scores beyond ±32,000 and 44,052 lines with depth 39,999, outside its 0–127 range) and leaves 537 positions with no moves; the prior for those positions is the network policy alone. |
 
 ### 3. Build the book
 The convenience launcher `puct-book` runs the same pipeline with optional `SEARCH_SECONDS` (default 2,592,000 seconds / 30 days) and `GPU_COUNT` (default 2). It stops Strata and llama-swap when GPU preflight finds insufficient free memory, then restores services that were running before the launch. A manual Ctrl-C stops search without running propagation or export; run those steps afterward if needed. For a non-destructive GPU check, use `PREFLIGHT_ONLY=1 bash dlshogi/book/run.sh` directly.
@@ -151,7 +151,7 @@ python -m dlshogi.book propagate --config config.yaml
 python -m dlshogi.book export --config config.yaml --apery book.ap --yaneuraou book.db
 ```
 
-Optionally seed from an existing YaneuraOu Terashock book before `search`:
+Optionally seed from an existing YaneuraOu Terashock book before `search`. Because the importer now stores flipped entries (parser version 2), a database that was seeded with an older book re-imports automatically the next time `search` starts, replacing the contents of `terashock_entry`. The re-import only rewrites `terashock_entry` and `book_meta`, in one transaction, so a failure leaves the old index in place; the graph `search` has already built (`book_node`) is not modified. It takes about 4–5 minutes and about 5.3 GB of memory for the 2.25M-position book (measured on this machine; the database insert is on top), and `search` runs it once, in the parent process, before it starts the GPU workers. Nodes created after the re-import get the new prior; existing nodes keep the one they were created with. Run it yourself first (it needs no GPU) to check the result before a long `search`; afterwards `terashock_entry` should hold about 4.5 million rows and `book_meta.terashock_parser_version` should be 2. To go back to an older book, put its path in `Terashock_Book path` and run the same command: the file changes, so the index is rebuilt from it.
 
 ```bash
 python -m dlshogi.book import-terashock --config config.yaml
@@ -160,7 +160,7 @@ python -m dlshogi.book import-terashock --config config.yaml
 
 ### 4. Benchmark the exported books
 
-Run the CPU YaneuraOu benchmark to compare the generated PUCT book, the Terashock source book, and no book:
+Run the CPU benchmark (NAGISA_V4, a YaneuraOu-based engine) to compare the generated PUCT book, the Terashock source book, and no book:
 
 ```bash
 ./dlshogi/book/benchmark.sh
@@ -172,15 +172,31 @@ The default run plays 30 games per pairing and writes `output/book-benchmark.jso
 - PUCT vs Terashock
 - Terashock vs no book
 
-The benchmark uses `/home/hmatsuya/workspace/Shogi/YaneuraOuOriginal/exe/YaneuraOu-by-gcc`, 100,000 nodes per move, four YaneuraOu threads, and `USI_Ponder=false`. Its global concurrency default is 8 games, divided across the three pairings. Books are staged in a unique temporary directory and removed after the run.
+The Terashock side uses the 新ペタショック定跡 233万局面 book (`new_petabook_20250505c.db`, MIT licence, 2,252,118 positions, WCSC35). It is the YaneuraOu release `new_petabook233` (SHA-256 of the `.7z`: `158a891f…1fb3`); `run.sh` downloads and checks it when the file is missing, and the copy on this machine has a `.source.txt` note beside it. It lists Black-to-move positions only; YaneuraOu reaches White-to-move positions through `FlippedBook`. Use `TERASHOCK_BOOK=/path/to/book.db` to benchmark a different book.
+
+The benchmark uses `/home/hmatsuya/workspace/Shogi/nagisa-bench/NAGISA_V4`, 100,000 nodes per move, four threads, and `USI_Ponder=false`. `nagisa-bench` is a small directory of links to the unpacked `nagisa-v4` release, with its own `eval/eval_options.txt` (only `FV_SCALE 28`) and `engine_option_profile.txt` (`BOOK_OPTIONS=V2`): the release's own `eval_options.txt` forces `USI_OwnBook=false` and `BookFile=no_book` when the engine loads, which overrides the book options the benchmark sends. Set `ENGINE=` to use another engine, for example the earlier YaneuraOu build at `/home/hmatsuya/workspace/Shogi/YaneuraOuOriginal/exe/YaneuraOu-by-gcc`. Its global concurrency default is 8 games, divided across the three pairings. Books are staged in a unique temporary directory and removed after the run.
 
 Override the main settings with environment variables:
 
 ```bash
-GAMES=100 NODES=100000 CONCURRENCY=8 MAX_PLY=256 TIMEOUT=120 \
+GAMES=100 NODES=100000 CONCURRENCY=8 MAX_PLY=320 TIMEOUT=120 \
   ./dlshogi/book/benchmark.sh
 ```
 
-Set `BOOK_DIR=/path/to/dir` to preserve staged books in a user-owned directory. Pass `--keep-temp` to preserve and print a benchmark-owned temporary directory. The benchmark sets `BookDepthLimit=0`, `ConsiderBookMoveCount=true`, `BookEvalWhiteLimit=-300`, and disables pondering. It uses fourfold repetition adjudication and reports wins, losses, draws, and aborted games in the JSON output.
+Set `BOOK_DIR=/path/to/dir` to preserve staged books in a user-owned directory. Pass `--keep-temp` to preserve and print a benchmark-owned temporary directory. Pondering is disabled, and repetition is adjudicated at the fourth occurrence.
+
+The benchmark expects the V2 book options (`BOOK_OPTIONS=V2` in `engine_option_profile.txt` beside the executable; NAGISA_V4 and the YaneuraOu build both offer them only with it) and sends `BookMoves=320`, `BookOnTheFly=true`, `BookEvalBlackLimit=-500`, `BookEvalWhiteLimit=-500` and `BookDepthWhiteLimit=0`. `BookEvalBlackDiff` and `BookEvalWhiteDiff` depend on the book and not on the colour: 40 for the PUCT book, which varies its lines, and 0 for the Terashock book, which then always plays its top move. These values come from 300-game runs on the earlier YaneuraOu build, not on NAGISA_V4: Diff 40 on the Terashock book cost it about 9 points against no book (47.8% against 57.5% at Diff 0), and the PUCT book scored 45.5% against Terashock at Diff 40 and 40.5% at Diff 0, a gap within the noise of that sample size. On NAGISA_V4 with the settings above, 300 games per pairing gave Terashock 61.5% against no book, PUCT 49.2% against no book, and PUCT 41.0% against Terashock. The limits and Diff values are centipawns and were not re-checked against NAGISA_V4's evaluation scale. The V1 options (`BookDepthLimit`, `ConsiderBookMoveCount`, `BookEvalDiff`) do not exist under V2.
+
+Each pairing reports, in the console and in `output/book-benchmark.json`:
+
+- the overall result and the first engine's score (`score_a` in the JSON, a draw counts 0.5);
+- `black_win_rate` and `white_win_rate`: how often the Black side and the White side won, whichever engine played it;
+- `a_as_black` and `a_as_white`: the first engine's result when it played each colour;
+- `book_a` and `book_b`: moves each engine took from its book (`book_moves`, `moves`, `book_share`, `book_moves_per_game`); both are always 0 for an engine with no book, which makes that side a control.
+
+A move counts as a book move when the engine has a book and the last info line that carries a node count, before its `bestmove`, reports `nodes 0`. This also matches any other skipped search (a declaration win or resign), but those end the game before a move is counted, so book counts are not inflated under the default `EnteringKingRule`. All rates use completed games only; aborted games are counted separately and excluded. Win rates divide wins by the games in that group, so draws lower both colours' rates. With an odd `--games` the first engine plays one more game as Black, so `a_as_black` and `a_as_white` have different sizes.
+
+Unit tests for this accounting are in `tests/test_book_benchmark.py` and need no engine.
+
 `search` is the only GPU-bound step (keep `--gpu-count` at or below your GPU
 count); `propagate` and `export` use the database only.

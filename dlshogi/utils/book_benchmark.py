@@ -6,6 +6,7 @@ import argparse
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import json
 import os
+import re
 import selectors
 import shutil
 import tempfile
@@ -21,9 +22,20 @@ from typing import Optional
 import cshogi
 
 
-DEFAULT_ENGINE = Path("/home/hmatsuya/workspace/Shogi/YaneuraOuOriginal/exe/YaneuraOu-by-gcc")
+DEFAULT_ENGINE = Path("/home/hmatsuya/workspace/Shogi/nagisa-bench/NAGISA_V4")
 DEFAULT_PUCT_BOOK = Path("output/punct_book.yaneuraou.db")
-DEFAULT_TERASHOCK_BOOK = Path("/home/hmatsuya/workspace/Shogi/data/terashock/user_book1.db")
+DEFAULT_TERASHOCK_BOOK = Path("/home/hmatsuya/workspace/Shogi/data/terashock/new_petabook_20250505c.db")
+
+# BookEval*Diff per staged book, same for both colours: the PUCT book gets 40 (varied lines), the Terashock book 0 (its top move is
+# its strongest). A book-less engine never reads it.
+BOOK_EVAL_DIFF = {"user_book1.db": "40", "user_book2.db": "0"}
+
+# A book hit prints only "nodes 0" info lines; a real search ends with a non-zero count.
+# The rule reads the last info line that carries a node count, ignoring "info string" and lines without one.
+# shortcut: "nodes 0" marks any skipped search, not only book hits (declaration win and resign
+# also skip). With the default EnteringKingRule a declaration win replies "win", which ends the
+# game before a move is counted; TryRule would be miscounted. Upgrade if that rule is ever used.
+_NODES_RE = re.compile(r"\bnodes (\d+)")
 
 
 class BenchmarkError(RuntimeError):
@@ -46,11 +58,12 @@ def stage_books(puct_source: Path, terashock_source: Path, book_dir: Path) -> tu
 
     def stats(path: Path) -> BookStats:
         entries = records = 0
-        for line in path.read_text(encoding="utf-8-sig").splitlines():
-            if line.startswith("sfen "):
-                entries += 1
-            elif line and not line.startswith("#"):
-                records += 1
+        with path.open(encoding="utf-8-sig") as f:   # stream: the petabook is 493 MB
+            for line in f:
+                if line.startswith("sfen "):
+                    entries += 1
+                elif line.strip() and not line.startswith("#"):
+                    records += 1
         return BookStats(entries, records)
 
     return stats(puct_dest), stats(terashock_dest)
@@ -59,6 +72,7 @@ def stage_books(puct_source: Path, terashock_source: Path, book_dir: Path) -> tu
 class USIProcess:
     def __init__(self, executable: Path, book_file: str, book_dir: Path, timeout: float, nodes: int):
         self.timeout = timeout
+        self.has_book = book_file != "no_book"
         self.process = subprocess.Popen(
             [str(executable)],
             cwd=str(executable.parent),
@@ -84,9 +98,11 @@ class USIProcess:
                 "BookDir": str(book_dir),
                 "BookDepthWhiteLimit": "0",
                 "BookMoves": "320",
-                "BookEvalBlackDiff": "120",
-                "BookEvalWhiteDiff": "120",
-                "BookEvalWhiteLimit": "-150",
+                "BookOnTheFly": "true",
+                "BookEvalBlackDiff": BOOK_EVAL_DIFF.get(book_file, "0"),
+                "BookEvalWhiteDiff": BOOK_EVAL_DIFF.get(book_file, "0"),
+                "BookEvalBlackLimit": "-500",
+                "BookEvalWhiteLimit": "-500",
                 "MaxMovesToDraw": "320",
                 "ResignValue": "99999",
                 "MinimumThinkingTime": "1",
@@ -131,17 +147,24 @@ class USIProcess:
         while self._read_line() != expected:
             pass
 
-    def bestmove(self, moves: list[str], nodes: int) -> str:
+    def bestmove(self, moves: list[str], nodes: int) -> tuple[str, bool]:
+        """Return (move, from_book). A move is from the book when the engine has one
+        and the last info line that carries a node count, before ``bestmove``, reports ``nodes 0``."""
         position = "position startpos" + ((" moves " + " ".join(moves)) if moves else "")
         self._send(position)
         self._send(f"go nodes {nodes}")
+        last_nodes = None
         while True:
             line = self._read_line()
-            if line.startswith("bestmove "):
+            if line.startswith("info ") and not line.startswith("info string"):
+                found = _NODES_RE.search(line)
+                if found:
+                    last_nodes = int(found.group(1))
+            elif line.startswith("bestmove "):
                 fields = line.split()
                 if len(fields) < 2:
                     raise BenchmarkError(f"malformed bestmove: {line!r}")
-                return fields[1]
+                return fields[1], self.has_book and last_nodes == 0
 
     def gameover(self, result: str) -> None:
         self._send(f"gameover {result}")
@@ -165,15 +188,28 @@ def engine_for_color(color: int, a_is_black: bool) -> int:
     return 0 if color == (cshogi.BLACK if a_is_black else cshogi.WHITE) else 1
 
 
-def finish(engine_a: USIProcess, engine_b: USIProcess, result: str) -> str:
+@dataclass
+class GameRecord:
+    """One finished game. ``result`` is a_win, b_win, draw or aborted."""
+    result: str
+    a_is_black: bool
+    a_book_moves: int = 0
+    a_moves: int = 0
+    b_book_moves: int = 0
+    b_moves: int = 0
+
+
+def finish(engine_a: USIProcess, engine_b: USIProcess, record: GameRecord, result: str) -> GameRecord:
     engine_a.gameover("win" if result == "a_win" else "lose" if result == "b_win" else "draw")
     engine_b.gameover("win" if result == "b_win" else "lose" if result == "a_win" else "draw")
-    return result
+    record.result = result
+    return record
 
 
-def play_game(engine_a: USIProcess, engine_b: USIProcess, nodes: int, a_is_black: bool, max_ply: int) -> str:
+def play_game(engine_a: USIProcess, engine_b: USIProcess, nodes: int, a_is_black: bool, max_ply: int) -> GameRecord:
     board = cshogi.Board()
     moves: list[str] = []
+    record = GameRecord("aborted", a_is_black)
     repetitions = defaultdict(int)
     repetitions[board.zobrist_hash()] = 1
     engine_a._send("usinewgame")
@@ -185,29 +221,103 @@ def play_game(engine_a: USIProcess, engine_b: USIProcess, nodes: int, a_is_black
                 repetition = cshogi.NOT_REPETITION
             if repetition in (cshogi.REPETITION_WIN, cshogi.REPETITION_LOSE):
                 winner = board.turn if repetition == cshogi.REPETITION_WIN else 1 - board.turn
-                return finish(engine_a, engine_b, "a_win" if engine_for_color(winner, a_is_black) == 0 else "b_win")
+                return finish(engine_a, engine_b, record, "a_win" if engine_for_color(winner, a_is_black) == 0 else "b_win")
             if repetition in (cshogi.REPETITION_DRAW, cshogi.REPETITION_SUPERIOR, cshogi.REPETITION_INFERIOR):
-                return finish(engine_a, engine_b, "draw")
+                return finish(engine_a, engine_b, record, "draw")
             index = engine_for_color(board.turn, a_is_black)
-            move_text = (engine_a if index == 0 else engine_b).bestmove(moves, nodes)
+            move_text, from_book = (engine_a if index == 0 else engine_b).bestmove(moves, nodes)
+            # resign / win / 0000 end the game and are not moves, so they are not counted as moves or book moves.
             if move_text in ("resign", "win") or move_text == "0000":
                 if move_text == "win":
-                    return finish(engine_a, engine_b, "a_win" if index == 0 else "b_win")
-                return finish(engine_a, engine_b, "b_win" if index == 0 else "a_win")
+                    return finish(engine_a, engine_b, record, "a_win" if index == 0 else "b_win")
+                return finish(engine_a, engine_b, record, "b_win" if index == 0 else "a_win")
             move = board.move_from_usi(move_text)
             if move == cshogi.MOVE_NONE or move not in board.legal_moves:
                 raise BenchmarkError(f"illegal bestmove {move_text!r} at ply {ply}")
+            if index == 0:
+                record.a_moves += 1
+                record.a_book_moves += from_book
+            else:
+                record.b_moves += 1
+                record.b_book_moves += from_book
             board.push(move)
             repetitions[board.zobrist_hash()] += 1
             moves.append(move_text)
-        return finish(engine_a, engine_b, "draw")
+        return finish(engine_a, engine_b, record, "draw")
     except Exception as exc:
         print(f"benchmark game aborted: {exc!r}", file=sys.stderr)
-        return "aborted"
+        return record  # still "aborted": finish() is the only place a result is set
+
+
+def _rate(wins: int, games: int) -> Optional[float]:
+    return wins / games if games else None
+
+
+def summarize(name_a: str, name_b: str, records: list[GameRecord], games_requested: int) -> dict[str, object]:
+    """Turn finished games into the pairing report. Aborted games are counted but excluded
+    from every rate, so every rate uses completed games only. ``book_share`` is the exception
+    in its denominator: it divides by moves, not games."""
+    done = [r for r in records if r.result != "aborted"]
+
+    def side(a_black: bool) -> dict[str, object]:
+        # Games in which engine A played Black (a_black) or White.
+        g = [r for r in done if r.a_is_black == a_black]
+        a_w = sum(r.result == "a_win" for r in g)
+        b_w = sum(r.result == "b_win" for r in g)
+        d = len(g) - a_w - b_w
+        return {"games": len(g), "a_wins": a_w, "b_wins": b_w, "draws": d,
+                "a_score": _rate(a_w + 0.5 * d, len(g))}
+
+    as_black, as_white = side(True), side(False)
+    wins_a = as_black["a_wins"] + as_white["a_wins"]
+    wins_b = as_black["b_wins"] + as_white["b_wins"]
+    draws = as_black["draws"] + as_white["draws"]
+    # Black side wins: A's wins while A was Black plus B's wins while A was White.
+    black_wins = as_black["a_wins"] + as_white["b_wins"]
+    white_wins = as_black["b_wins"] + as_white["a_wins"]
+
+    def book(used: int, total: int) -> dict[str, object]:
+        return {"book_moves": used, "moves": total, "book_share": _rate(used, total),
+                "book_moves_per_game": _rate(used, len(done))}
+
+    return {
+        "a": name_a, "b": name_b, "games_requested": games_requested, "completed": len(done),
+        "a_wins": wins_a, "b_wins": wins_b, "draws": draws, "aborted": len(records) - len(done),
+        "score_a": _rate(wins_a + 0.5 * draws, len(done)),
+        "black_wins": black_wins, "white_wins": white_wins,
+        "black_win_rate": _rate(black_wins, len(done)), "white_win_rate": _rate(white_wins, len(done)),
+        "a_as_black": as_black, "a_as_white": as_white,
+        "book_a": book(sum(r.a_book_moves for r in done), sum(r.a_moves for r in done)),
+        "book_b": book(sum(r.b_book_moves for r in done), sum(r.b_moves for r in done)),
+    }
+
+
+def _pct(value: Optional[float]) -> str:
+    return "n/a" if value is None else f"{100 * value:.1f}%"
+
+
+def format_pair(pair: dict[str, object]) -> str:
+    """Human-readable report for one pairing (the JSON keeps the full detail)."""
+    a, b = pair["a"], pair["b"]
+    lines = [f"{a} vs {b}: {pair['a_wins']}-{pair['b_wins']}-{pair['draws']} (aborted {pair['aborted']}), "
+             f"score_{a}={_pct(pair['score_a'])}",
+             f"  side win rate: black {_pct(pair['black_win_rate'])} ({pair['black_wins']}), "
+             f"white {_pct(pair['white_win_rate'])} ({pair['white_wins']})"]
+    for key, label in (("a_as_black", f"{a} as black"), ("a_as_white", f"{a} as white")):
+        s = pair[key]
+        lines.append(f"  {label}: {s['a_wins']}-{s['b_wins']}-{s['draws']} of {s['games']}, score {_pct(s['a_score'])}")
+    for key, name in (("book_a", a), ("book_b", b)):
+        s = pair[key]
+        if s["moves"] == 0:
+            lines.append(f"  book moves {name}: n/a (no completed games)")
+        else:
+            lines.append(f"  book moves {name}: {s['book_moves']} of {s['moves']} ({_pct(s['book_share'])}), "
+                         f"{s['book_moves_per_game']:.1f}/game")
+    return "\n".join(lines)
 
 
 def run_pair(name_a: str, file_a: str, name_b: str, file_b: str, *, engine: Path, book_dir: Path, games: int, nodes: int, timeout: float, max_ply: int, concurrency: int) -> dict[str, object]:
-    counts = {"a_wins": 0, "b_wins": 0, "draws": 0, "aborted": 0}
+    records: list[GameRecord] = []
 
     def start():
         return (USIProcess(engine, file_a, book_dir, timeout, nodes), USIProcess(engine, file_b, book_dir, timeout, nodes))
@@ -226,15 +336,7 @@ def run_pair(name_a: str, file_a: str, name_b: str, file_b: str, *, engine: Path
             done, _ = wait(futures, return_when=FIRST_COMPLETED)
             for future in done:
                 lane, game, a, b = futures.pop(future)
-                result = future.result()
-                if result == "a_win":
-                    counts["a_wins"] += 1
-                elif result == "b_win":
-                    counts["b_wins"] += 1
-                elif result == "draw":
-                    counts["draws"] += 1
-                else:
-                    counts["aborted"] += 1
+                records.append(future.result())
                 a.close()
                 b.close()
                 if pending:
@@ -247,10 +349,7 @@ def run_pair(name_a: str, file_a: str, name_b: str, file_b: str, *, engine: Path
         for a, b in lanes:
             a.close()
             b.close()
-
-    completed = counts["a_wins"] + counts["b_wins"] + counts["draws"]
-    counts.update({"a": name_a, "b": name_b, "games_requested": games, "completed": completed, "score_a": (counts["a_wins"] + 0.5 * counts["draws"]) / completed if completed else None})
-    return counts
+    return summarize(name_a, name_b, records, games)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -303,7 +402,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     for pair in pairs:
-        print(f"{pair['a']} vs {pair['b']}: {pair['a_wins']}-{pair['b_wins']}-{pair['draws']} (aborted {pair['aborted']}), score_a={pair['score_a']}")
+        print(format_pair(pair))
     print(f"results: {args.output}")
     if args.keep_temp or not owns_book_dir:
         print(f"book directory: {args.book_dir}")
