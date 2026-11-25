@@ -15,7 +15,7 @@ cd /home/hmatsuya/workspace/Shogi/dlcobra
 ONNX="${ONNX:-/home/hmatsuya/workspace/Shogi/dlcobra/exp036_model.onnx}"
 PY="${PY:-/home/hmatsuya/workspace/Shogi/dlcobra/.venv/bin/python}"
 CFG=/tmp/config.yaml
-TS_BOOK=/home/hmatsuya/workspace/Shogi/data/terashock/user_book1.db
+TS_BOOK=/home/hmatsuya/workspace/Shogi/data/terashock/new_petabook_20250505c.db
 BOOK_LOCK_DIR=/home/hmatsuya/workspace/Shogi/dlcobra/output/.puct-book
 BOOK_LOCK_FILE="$BOOK_LOCK_DIR/book.lock"
 SEARCH_SECONDS="${1:-2592000}"   # 30 days; Ctrl-C (or TERM/HUP) to stop early
@@ -165,14 +165,23 @@ fi
 LOG=/tmp/punct_book_run.log
 OUT="${OUT:-/home/hmatsuya/workspace/Shogi/dlcobra/output}"
 mkdir -p "$OUT"
-# Fetch the 700T shock book (YaneuraOu BOOK-700T-Shock, WCSC29) if not present.
+# Fetch the 2.25M-position petashock book (YaneuraOu release new_petabook233, WCSC35, MIT) if not present.
+# The asset is a 7z holding one user_book1.db; its SHA-256 is the digest GitHub publishes for the release.
+TS_URL="https://github.com/yaneurao/YaneuraOu/releases/download/new_petabook233/new_petabook_20250505c.7z"
+TS_SHA256=158a891fcb685af65a7d633541b5af57eb085422ff26372d53f6d92158031fb3
 if [ ! -f "$TS_BOOK" ]; then
     mkdir -p "$(dirname "$TS_BOOK")"
-    curl -fsSL "https://github.com/yaneurao/YaneuraOu/releases/download/BOOK-700T-Shock/700T-shock-book.zip" \
-        -o /tmp/100T-shock-book.zip \
-        && "$PY" -m zipfile -e /tmp/100T-shock-book.zip /tmp/100T \
-        && cp /tmp/100T/user_book1.db "$TS_BOOK" \
-        || die 1 "could not fetch the Terashock book to $TS_BOOK"
+    command -v 7z >/dev/null || die 1 "7z (p7zip-full) is required to unpack $TS_URL"
+    TS_TMP=$(mktemp -d /tmp/petabook.XXXXXX) || die 1 "could not create a temporary directory under /tmp"
+    trap 'rm -rf "$TS_TMP"; preflight_interrupt' INT TERM HUP
+    curl -fsSL "$TS_URL" -o "$TS_TMP/book.7z" \
+        && echo "$TS_SHA256  $TS_TMP/book.7z" | sha256sum -c --status \
+        && 7z x -y -o"$TS_TMP" "$TS_TMP/book.7z" >/dev/null \
+        && cp "$TS_TMP/user_book1.db" "$TS_BOOK.part" \
+        && mv -f "$TS_BOOK.part" "$TS_BOOK" \
+        || { rm -rf "$TS_TMP" "$TS_BOOK.part"; die 1 "could not fetch, verify and install the petashock book at $TS_BOOK"; }
+    rm -rf "$TS_TMP"
+    trap preflight_interrupt INT TERM HUP
 fi
 # Terashock import happens automatically inside `search` (once per book;
 # source identity is tracked in book_meta). Explicit `import-terashock`

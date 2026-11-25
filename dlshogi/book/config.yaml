@@ -24,5 +24,6 @@ Export_Visit_Threshold: 0.0
 Connection_Retry_Limit: 5
 Root_Position: "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1"
 Report_Interval: 30
-# 100T shock book (YaneuraOu BOOK-100T-Shock) as prior.
-"Terashock_Book path": "/home/hmatsuya/workspace/Shogi/data/terashock/user_book1.db"
+# New petashock book, 2.25M positions (YaneuraOu release new_petabook233, WCSC35, MIT) as prior.
+# It lists Black-to-move positions only; import-terashock stores the 180-degree flips too.
+"Terashock_Book path": "/home/hmatsuya/workspace/Shogi/data/terashock/new_petabook_20250505c.db"

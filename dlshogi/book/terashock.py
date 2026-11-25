@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Optional
 
 import asyncpg
+import cshogi
 import numpy as np
 
 from dlshogi.book.book_db import BookDBParser, TerashockEntry, TerashockMove
@@ -56,10 +57,11 @@ from dlshogi.book.packed_edge import PACKED_TS_MOVE
 
 _LOG = logging.getLogger(__name__)
 
-# Parser version constant: recorded in book_meta to detect when the parser
+# Parser version constant: recorded in book_meta to detect when the import
 # logic changes and a reimport is needed (even if the .db file itself has
-# not changed on disk). Bump this whenever BookDBParser semantics change.
-PARSER_VERSION = 1
+# not changed on disk). Bump this whenever BookDBParser semantics or what
+# import_terashock stores for the same file change.
+PARSER_VERSION = 2   # 2: the importer also stores 180-degree flipped entries
 
 # Imports recorded before terashock_parser_version existed were all made by v1.
 _LEGACY_PARSER_VERSION = 1
@@ -144,6 +146,50 @@ def unpack_terashock_moves(blob: bytes) -> np.ndarray:
     if len(blob) == 0:
         return np.empty(0, dtype=PACKED_TS_MOVE)
     return np.frombuffer(blob, dtype=PACKED_TS_MOVE)
+
+
+# ---------------------------------------------------------------------------
+# 180-degree flipped entries
+# ---------------------------------------------------------------------------
+
+
+def flipped_entry(entry: TerashockEntry) -> TerashockEntry:
+    """The same entry seen from the other side: board rotated, every move rotated.
+
+    ``eval`` is kept as is. It is a score for the side to move, and the flip swaps which
+    colour moves while the player to move stays "the one on turn". YaneuraOu does the same
+    (``make_flipped_bookmoves`` copies ``bm.value``), and the prior only compares the evals
+    of one node's moves with each other, so negating them would invert the preferred move.
+    """
+    return TerashockEntry(
+        sfen=cshogi.rotate_sfen(entry.sfen),
+        moves=[
+            TerashockMove(
+                move16=cshogi.move_rotate(m.move16),
+                reply16=None if m.reply16 is None else cshogi.move_rotate(m.reply16),
+                eval=m.eval, depth=m.depth, count=m.count,
+            )
+            for m in entry.moves
+        ],
+    )
+
+
+def _entries_with_flips(entries: list[TerashockEntry]):
+    """Yield a flipped copy of every entry that has moves, then the entries themselves.
+
+    The 2025 book lists Black-to-move positions only, because YaneuraOu answers a
+    White-to-move position through ``FlippedBook``. The PUCT search looks positions up
+    by exact key, so it needs the flipped positions as real entries.
+
+    The order does the de-duplication. The staging step keeps the last row per key, so a
+    position the book holds itself, which comes last, beats a flipped copy of another
+    entry, and among repeated positions (a different ply) the last one wins for the
+    flip and for the original alike. ``entries`` is read twice, so it must be a list.
+    """
+    for e in entries:
+        if e.moves:
+            yield flipped_entry(e)
+    yield from entries
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +368,7 @@ async def import_terashock(
     records: list[tuple[int, int, str, bytes]] = []
     unindexable_count = 0
     first_unindexable: Optional[str] = None
-    for entry in book.entries:
+    for entry in _entries_with_flips(book.entries):
         try:
             pk = position_key_from_sfen(entry.sfen)
         except Exception:
@@ -376,7 +422,7 @@ async def import_terashock(
             # copy_records_to_table for bulk load.
             await conn.copy_records_to_table(
                 "_terashock_staging",
-                records=[(i, *r) for i, r in enumerate(records)],
+                records=((i, *r) for i, r in enumerate(records)),
                 columns=["seq", "key_hi", "key_lo", "sfen", "moves"],
             )
 

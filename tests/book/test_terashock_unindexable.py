@@ -65,9 +65,10 @@ async def test_unindexable_entries_are_skipped_counted_and_logged(
         async with store.pool.acquire() as conn:
             rows = await conn.fetch("SELECT key_hi, key_lo, sfen FROM terashock_entry")
 
-        assert [r["sfen"] for r in rows] == [_INITIAL_SFEN]
+        # The one good entry is stored with its 180-degree flip (parser v2); the bad SFENs are not.
+        assert sorted(r["sfen"] for r in rows) == sorted([_INITIAL_SFEN, _INITIAL_SFEN.replace(" b ", " w ")])
         assert not any(r["key_hi"] == 0 and r["key_lo"] == 0 for r in rows)
-        assert stats.entry_count == 1
+        assert stats.entry_count == 2
         assert stats.unindexable_count == len(_BAD_SFENS)
         assert stats.duplicate_count == 0  # they used to collide with each other at (0, 0)
         warning = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]

@@ -904,6 +904,19 @@ identity (path, size, mtime, entry count, parser version) in `book_meta` is comp
 configured file; a mismatch or absence triggers the import before any command is accepted
 (Requirement 7.1).
 
+**Flipped entries (parser version 2).** The 2025 book lists Black-to-move positions only;
+YaneuraOu reaches White to move through its `FlippedBook` option. `search` looks a node up by
+exact Position_Key, so the importer also stores a 180-degree flipped copy of every entry that has
+moves: the board is rotated, every `move16` and `reply16` is rotated with `cshogi.move_rotate`, and
+`eval`, `depth` and `count` are kept as they are (`eval` is a score for the side to move, which is
+also what YaneuraOu does when it flips a book). Requirement 7.1 is still met, because the index
+holds every parsed entry; it just holds more than that. The copies are yielded before the book's own
+entries and the staging step keeps the last row per key, so a position the book lists itself always
+beats a flipped copy of another entry, and a position the book repeats with different plies uses
+the same, last, row for both colours. `PARSER_VERSION` is 2 because the same file now yields
+different `terashock_entry` content; an index recorded as version 1 (or none) re-imports. The
+re-import writes only `terashock_entry` and `book_meta`, in one transaction.
+
 **In PostgreSQL, not in memory or in a memory-mapped file.** The requirement is 1 ms p95 over
 10^7 entries. A single b-tree probe on a 10^7-row table is 3 index levels plus one heap page: 4
 page reads, ~400 us cold on NVMe and near zero warm, comfortably inside 1 ms. The alternative --

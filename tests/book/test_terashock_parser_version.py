@@ -76,13 +76,13 @@ async def test_a_parser_bump_triggers_a_reimport_for_an_unchanged_file(
 async def test_a_database_imported_before_the_column_existed_is_treated_as_v1(
     pg_scratch_database, pg_conn, tmp_path
 ):
-    """No spurious 33 MB reimport for the existing puct_book: NULL means parser v1."""
+    """NULL means parser v1. The current parser is v2 (it adds flipped entries), so a v1 index reimports."""
     cfg, store = await _imported(pg_scratch_database, pg_conn, tmp_path)
     try:
         async with store.pool.acquire() as conn:
             await conn.execute("UPDATE book_meta SET terashock_parser_version = NULL")
-        assert T.PARSER_VERSION == 1
-        assert await T.check_terashock_source(store.pool, cfg) is False
+        assert T.PARSER_VERSION == 2 and T._LEGACY_PARSER_VERSION == 1
+        assert await T.check_terashock_source(store.pool, cfg) is True
     finally:
         await store.close()
 
@@ -101,7 +101,7 @@ async def test_repair_adds_the_column_to_an_older_database(pg_scratch_database, 
             )
         assert (row["terashock_source_path"], row["terashock_entry_count"]) == tuple(before.values())
         assert row["terashock_parser_version"] is None  # legacy: read as v1
-        assert await T.check_terashock_source(store.pool, cfg) is False
+        assert await T.check_terashock_source(store.pool, cfg) is True  # v1 index is older than parser v2
     finally:
         await store.close()
 
